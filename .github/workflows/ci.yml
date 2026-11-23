@@ -18,4 +18,12 @@ jobs:
           python-version: '3.13'
       - run: npm install --global pnpm@11.7.0
       - run: pnpm install --frozen-lockfile
+      - name: Build pinned budget plugin
+        run: |
+          git clone --depth 1 https://github.com/winter-street/dsh-plugin-agent-budget.git .sources/budget
+          git -C .sources/budget fetch --depth 1 origin 28c77462aa20ceb27acc0cec99db0dea11087dbc
+          git -C .sources/budget checkout --detach 28c77462aa20ceb27acc0cec99db0dea11087dbc
+          git -C .sources/budget apply ../../integrations/budget/reservations.patch
+          pnpm --dir .sources/budget install --frozen-lockfile --ignore-scripts
+          pnpm --dir .sources/budget run build
       - run: pnpm check
