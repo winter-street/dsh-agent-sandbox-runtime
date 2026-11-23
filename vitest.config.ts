@@ -6,6 +6,7 @@ export default defineConfig({
     exclude: ['tests/live/**'],
     environment: 'node',
     testTimeout: 60_000,
+    fileParallelism: process.env.CI ? false : true,
     restoreMocks: true,
   },
 });
