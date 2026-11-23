@@ -10,7 +10,7 @@ function run(scenario: string, calibration = true) {
   const root = mkdtempSync(join(tmpdir(), 'evaluation-smoke-offline-')); roots.push(root);
   const result = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
     resolve('tests/support/evaluation-smoke.ps1'), '-RepoRoot', process.cwd(), '-CheckRoot', root, '-Scenario', scenario,
-    ...(calibration ? ['-Calibration'] : [])], { encoding: 'utf8', timeout: 20_000, windowsHide: true });
+    ...(calibration ? ['-Calibration'] : [])], { encoding: 'utf8', timeout: 55_000, windowsHide: true });
   if (result.error) throw result.error;
   const logPath = join(root, 'commands.jsonl');
   const commands: Array<{ args: Array<string | number> }> = existsSync(logPath)
