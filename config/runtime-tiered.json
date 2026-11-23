@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "dataDir": ".runtime/evaluation/tiered",
+  "sandbox": {
+    "image": "python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535",
+    "cpu": 1,
+    "memoryMiB": 512,
+    "ttlSeconds": 600,
+    "commandTimeoutMs": 60000,
+    "maxLogBytes": 128000,
+    "maxOutputBytes": 10000000,
+    "maxOutputFiles": 20,
+    "network": { "defaultAction": "deny", "allowHosts": [] }
+  },
+  "policy": { "mode": "enforce", "finalizeShare": 0 }
+}

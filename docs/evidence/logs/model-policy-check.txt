@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 D:/1GISwork/11-OPENSANDBOX+runtime
+
+ ✓ tests/adapters/budget.test.ts (3 tests) 8ms
+ ✓ tests/adapters/model-policy.test.ts (14 tests) 183ms
+
+ Test Files  2 passed (2)
+      Tests  17 passed (17)
+   Start at  10:18:59
+   Duration  606ms (transform 147ms, setup 0ms, import 319ms, tests 191ms, environment 0ms)
+

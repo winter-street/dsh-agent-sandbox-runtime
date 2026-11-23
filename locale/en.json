@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Agent sandbox runtime",
+    "description": "Runs Python tool calls in isolated OpenSandbox containers with durable runs, committed artifacts, and independent acceptance.",
+    "detail": "docs/DETAIL.md"
+  }
+}

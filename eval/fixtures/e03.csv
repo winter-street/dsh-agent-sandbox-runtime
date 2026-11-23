@@ -1,0 +1,3 @@
+alert_id,device_id,occurred_at,severity,review_state
+E03A,D01,2026-11-01T06:00:00+08:00,high,rejected
+E03B,D02,2026-11-01T06:00:00+08:00,high,rejected

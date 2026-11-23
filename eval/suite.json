@@ -1,0 +1,766 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "charging-analysis-candidate-v1",
+  "phase": "frozen-for-final-evaluation",
+  "frozenForFinalEvaluation": true,
+  "expectedOrigin": "Calibration answers cross-checked against original frozen examples; evaluation answers reference-derived and require independent review before freezing.",
+  "referenceSha256": "955d536117db8adebf723146b5dd6b4831eb2c7a8f09b04226ca3326739d817c",
+  "taskPrompt": "TASK.md",
+  "taskPromptSha256": "cc1eb7b4fb080aaff7137765f7dcf7f69e436c51521a0657aa92cb3df1348024",
+  "tasks": [
+    {
+      "id": "c01",
+      "split": "calibration",
+      "title": "Calibration: normal.csv",
+      "input": "fixtures/c01.csv",
+      "inputSha256": "31864c8710ec8aa5f9e8ca15bb559a506c520c84f975f72258c15a1f35e05875",
+      "expectedStatistics": {
+        "total_alerts": 10,
+        "confirmed": 5,
+        "rejected": 2,
+        "pending": 3,
+        "false_positive_rate": 0.285714,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 4,
+            "confirmed": 3
+          },
+          {
+            "device_id": "D02",
+            "total": 3,
+            "confirmed": 2
+          },
+          {
+            "device_id": "D03",
+            "total": 2,
+            "confirmed": 0
+          },
+          {
+            "device_id": "D04",
+            "total": 1,
+            "confirmed": 0
+          }
+        ],
+        "time_bands": {
+          "00-05": 3,
+          "06-11": 2,
+          "12-17": 2,
+          "18-23": 3
+        },
+        "severity": {
+          "high": 4,
+          "medium": 3,
+          "low": 3,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "c02",
+      "split": "calibration",
+      "title": "Calibration: empty.csv",
+      "input": "fixtures/c02.csv",
+      "inputSha256": "75e8e4addeaae5a7566fe6180cb3b800675ecf4f0dcbfdff49e3be182bc61b99",
+      "expectedStatistics": {
+        "total_alerts": 0,
+        "confirmed": 0,
+        "rejected": 0,
+        "pending": 0,
+        "false_positive_rate": null,
+        "devices": [],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 0,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 0,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "c03",
+      "split": "calibration",
+      "title": "Calibration: missing-values.csv",
+      "input": "fixtures/c03.csv",
+      "inputSha256": "950ba7d18f9eccc79cb89c93ffb4e2dfbe7bb04081c171c49e3ee6651c0e839a",
+      "expectedStatistics": {
+        "total_alerts": 3,
+        "confirmed": 1,
+        "rejected": 1,
+        "pending": 1,
+        "false_positive_rate": 0.5,
+        "devices": [
+          {
+            "device_id": "D02",
+            "total": 2,
+            "confirmed": 0
+          },
+          {
+            "device_id": "D01",
+            "total": 1,
+            "confirmed": 1
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 1,
+          "12-17": 0,
+          "18-23": 2
+        },
+        "severity": {
+          "high": 1,
+          "medium": 0,
+          "low": 1,
+          "unknown": 1
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "c04",
+      "split": "calibration",
+      "title": "Calibration: bad-columns.csv",
+      "input": "fixtures/c04.csv",
+      "inputSha256": "d20275e7dcf7676dbf12692da97ec65e9ced95b4474bc00cd4ce3450525beec4",
+      "expectedStatistics": {
+        "error": "MISSING_COLUMN"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "c05",
+      "split": "calibration",
+      "title": "Calibration: invalid-time.csv",
+      "input": "fixtures/c05.csv",
+      "inputSha256": "80e5960de50021a2ee07d03396b1b53bf084aa3fdfee3be458e291c301911e46",
+      "expectedStatistics": {
+        "error": "INVALID_TIMESTAMP"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e01",
+      "split": "evaluation",
+      "title": "All reviewed alerts confirmed",
+      "input": "fixtures/e01.csv",
+      "inputSha256": "320145a53d32a7f8403338f6589f84ec673aa16ffb0960c2f3664f987ef04bfb",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 2,
+        "rejected": 0,
+        "pending": 0,
+        "false_positive_rate": 0.0,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 1,
+            "confirmed": 1
+          },
+          {
+            "device_id": "D02",
+            "total": 1,
+            "confirmed": 1
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 2,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 2,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e02",
+      "split": "evaluation",
+      "title": "Pending-only denominator is null",
+      "input": "fixtures/e02.csv",
+      "inputSha256": "275540c0a1c7bdd6245666de411fd06109c3de03bd20b34fc8f57279d54c62a7",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 0,
+        "rejected": 0,
+        "pending": 2,
+        "false_positive_rate": null,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 2,
+            "confirmed": 0
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 2,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 2,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e03",
+      "split": "evaluation",
+      "title": "All reviewed alerts rejected",
+      "input": "fixtures/e03.csv",
+      "inputSha256": "7d548a0f877b0df636635e5e2d2b388b387d4e835b3a626154d523c1c43477ca",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 0,
+        "rejected": 2,
+        "pending": 0,
+        "false_positive_rate": 1.0,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 1,
+            "confirmed": 0
+          },
+          {
+            "device_id": "D02",
+            "total": 1,
+            "confirmed": 0
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 2,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 2,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e04",
+      "split": "evaluation",
+      "title": "Ranking tie resolved by device identifier",
+      "input": "fixtures/e04.csv",
+      "inputSha256": "a30d0a392d136fd9ced2e35c248c368d4f2831760d0c6dc54457ecd2cc7a2e38",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 1,
+        "rejected": 0,
+        "pending": 1,
+        "false_positive_rate": 0.0,
+        "devices": [
+          {
+            "device_id": "D02",
+            "total": 1,
+            "confirmed": 0
+          },
+          {
+            "device_id": "D20",
+            "total": 1,
+            "confirmed": 1
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 2,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 2,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e05",
+      "split": "evaluation",
+      "title": "UTC timestamps cross the local date",
+      "input": "fixtures/e05.csv",
+      "inputSha256": "5a28b116b1f458e8932604a9089fc5a72fc8a2312d2fb9d1681b886089d40393",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 2,
+        "rejected": 0,
+        "pending": 0,
+        "false_positive_rate": 0.0,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 2,
+            "confirmed": 2
+          }
+        ],
+        "time_bands": {
+          "00-05": 1,
+          "06-11": 0,
+          "12-17": 0,
+          "18-23": 1
+        },
+        "severity": {
+          "high": 2,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e06",
+      "split": "evaluation",
+      "title": "Six-hour time-band boundaries",
+      "input": "fixtures/e06.csv",
+      "inputSha256": "98b2266d56ea36e552f16bb85f7069285c55c84451caedd09042a822913dd2b5",
+      "expectedStatistics": {
+        "total_alerts": 6,
+        "confirmed": 6,
+        "rejected": 0,
+        "pending": 0,
+        "false_positive_rate": 0.0,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 6,
+            "confirmed": 6
+          }
+        ],
+        "time_bands": {
+          "00-05": 1,
+          "06-11": 2,
+          "12-17": 2,
+          "18-23": 1
+        },
+        "severity": {
+          "high": 6,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e07",
+      "split": "evaluation",
+      "title": "Missing optional values use explicit defaults",
+      "input": "fixtures/e07.csv",
+      "inputSha256": "2f5ffb1f786b1053b38d5832277ff82e7b1e3e3ca9b710da8dfc8cdb92c8907f",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 0,
+        "rejected": 1,
+        "pending": 1,
+        "false_positive_rate": 1.0,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 1,
+            "confirmed": 0
+          },
+          {
+            "device_id": "D02",
+            "total": 1,
+            "confirmed": 0
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 2,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 0,
+          "medium": 0,
+          "low": 1,
+          "unknown": 1
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e08",
+      "split": "evaluation",
+      "title": "Required column missing",
+      "input": "fixtures/e08.csv",
+      "inputSha256": "5e0c1f25f8ff7c93adf6dd5d78286ca567aa683c656f6b71e2ecf286416b4e59",
+      "expectedStatistics": {
+        "error": "MISSING_COLUMN"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e09",
+      "split": "evaluation",
+      "title": "Malformed timestamp rejected",
+      "input": "fixtures/e09.csv",
+      "inputSha256": "ba9921eaa14b9e7587a50c86457085c45882e0c16d3233d3d2cd19f266d12bb2",
+      "expectedStatistics": {
+        "error": "INVALID_TIMESTAMP"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e10",
+      "split": "evaluation",
+      "title": "Naive timestamp rejected",
+      "input": "fixtures/e10.csv",
+      "inputSha256": "35c351a3b69a0a303c4db9856e9e31547e34808b5d5658f03921c3be3effede3",
+      "expectedStatistics": {
+        "error": "INVALID_TIMESTAMP"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e11",
+      "split": "evaluation",
+      "title": "Duplicate alert identifier rejected",
+      "input": "fixtures/e11.csv",
+      "inputSha256": "017e08994982971d6a8507e796efbc47bac376f0557d8779ac77ae1199ed8b43",
+      "expectedStatistics": {
+        "error": "INVALID_ID"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e12",
+      "split": "evaluation",
+      "title": "Unknown review enumeration rejected",
+      "input": "fixtures/e12.csv",
+      "inputSha256": "a14a77ec4816d5b7ed635f80b2ba42ec43aa0cb6cdc8c1ddd30780c88231b5b2",
+      "expectedStatistics": {
+        "error": "INVALID_ENUM"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e13",
+      "split": "evaluation",
+      "title": "Unknown severity enumeration rejected",
+      "input": "fixtures/e13.csv",
+      "inputSha256": "59c72b37ceae1f75be1b7cc95af9f62edaba19e0667915e3808130ad63e052a3",
+      "expectedStatistics": {
+        "error": "INVALID_ENUM"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e14",
+      "split": "evaluation",
+      "title": "Missing device identifier rejected",
+      "input": "fixtures/e14.csv",
+      "inputSha256": "7d138bb165e7f3f38fb538eeba25fb7d985c17fa400548a2a46ce96c4f09fe16",
+      "expectedStatistics": {
+        "error": "INVALID_ID"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e15",
+      "split": "evaluation",
+      "title": "Missing alert identifier rejected",
+      "input": "fixtures/e15.csv",
+      "inputSha256": "d60215ee2f66798f5ed5689834603f19da7df1ea92f21023ecaaae0e7941e765",
+      "expectedStatistics": {
+        "error": "INVALID_ID"
+      },
+      "requiredChecks": [
+        "statistics"
+      ]
+    },
+    {
+      "id": "e16",
+      "split": "evaluation",
+      "title": "Unicode device identifiers preserved",
+      "input": "fixtures/e16.csv",
+      "inputSha256": "272bc0362af873b3ded038c1e2a9c73fa42d69a6293dd6aa0d9df15e6c6d4c94",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 1,
+        "rejected": 1,
+        "pending": 0,
+        "false_positive_rate": 0.5,
+        "devices": [
+          {
+            "device_id": "设备乙",
+            "total": 1,
+            "confirmed": 0
+          },
+          {
+            "device_id": "设备甲",
+            "total": 1,
+            "confirmed": 1
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 2,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 2,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e17",
+      "split": "evaluation",
+      "title": "Quoted CSV delimiter in device identifier",
+      "input": "fixtures/e17.csv",
+      "inputSha256": "cef52f55baaec21e83819b0a212458e7accb70a14ffe7e11406afa1f7478e264",
+      "expectedStatistics": {
+        "total_alerts": 2,
+        "confirmed": 1,
+        "rejected": 0,
+        "pending": 1,
+        "false_positive_rate": 0.0,
+        "devices": [
+          {
+            "device_id": "Device,East",
+            "total": 1,
+            "confirmed": 1
+          },
+          {
+            "device_id": "Device,West",
+            "total": 1,
+            "confirmed": 0
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 2,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 2,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e18",
+      "split": "evaluation",
+      "title": "Mixed device, review, severity and time bands",
+      "input": "fixtures/e18.csv",
+      "inputSha256": "63dc1756a1864f92c8a221acee39809b2f591910d8854d03784099ae14f13685",
+      "expectedStatistics": {
+        "total_alerts": 12,
+        "confirmed": 4,
+        "rejected": 4,
+        "pending": 4,
+        "false_positive_rate": 0.5,
+        "devices": [
+          {
+            "device_id": "D00",
+            "total": 4,
+            "confirmed": 4
+          },
+          {
+            "device_id": "D01",
+            "total": 4,
+            "confirmed": 0
+          },
+          {
+            "device_id": "D02",
+            "total": 4,
+            "confirmed": 0
+          }
+        ],
+        "time_bands": {
+          "00-05": 3,
+          "06-11": 3,
+          "12-17": 3,
+          "18-23": 3
+        },
+        "severity": {
+          "high": 4,
+          "medium": 4,
+          "low": 4,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e19",
+      "split": "evaluation",
+      "title": "Six-decimal denominator rounding excludes pending",
+      "input": "fixtures/e19.csv",
+      "inputSha256": "6e5fb515b840b8f461e4189703b086ea32d73223820e68d102469a3974181478",
+      "expectedStatistics": {
+        "total_alerts": 4,
+        "confirmed": 2,
+        "rejected": 1,
+        "pending": 1,
+        "false_positive_rate": 0.333333,
+        "devices": [
+          {
+            "device_id": "D01",
+            "total": 4,
+            "confirmed": 2
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 4,
+          "12-17": 0,
+          "18-23": 0
+        },
+        "severity": {
+          "high": 4,
+          "medium": 0,
+          "low": 0,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    },
+    {
+      "id": "e20",
+      "split": "evaluation",
+      "title": "One-alert dataset has no invented trend",
+      "input": "fixtures/e20.csv",
+      "inputSha256": "27a2dabd8234de9875883ad0afbb4da342f0356e7a51e60c4df4f86aaaa2464f",
+      "expectedStatistics": {
+        "total_alerts": 1,
+        "confirmed": 0,
+        "rejected": 1,
+        "pending": 0,
+        "false_positive_rate": 1.0,
+        "devices": [
+          {
+            "device_id": "Solo",
+            "total": 1,
+            "confirmed": 0
+          }
+        ],
+        "time_bands": {
+          "00-05": 0,
+          "06-11": 0,
+          "12-17": 0,
+          "18-23": 1
+        },
+        "severity": {
+          "high": 0,
+          "medium": 0,
+          "low": 1,
+          "unknown": 0
+        }
+      },
+      "requiredChecks": [
+        "statistics",
+        "report",
+        "chart"
+      ]
+    }
+  ]
+}

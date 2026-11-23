@@ -1,0 +1,10 @@
+$ node scripts/vitest.mjs run
+
+ RUN  v4.1.11 D:/1GISwork/11-OPENSANDBOX+runtime/.sources/budget
+
+
+ Test Files  7 passed | 1 skipped (8)
+      Tests  104 passed | 1 skipped (105)
+   Start at  08:32:14
+   Duration  1.91s (transform 418ms, setup 0ms, import 1.09s, tests 2.04s, environment 1.51s)
+

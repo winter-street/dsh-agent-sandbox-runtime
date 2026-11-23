@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "runtimeConfigPath": "../config/example.json",
+  "dataDir": ".runtime/application",
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-chat",
+    "apiKeyEnv": "DEEPSEEK_API_KEY",
+    "thinking": "disabled",
+    "maxOutputTokens": 8192
+  },
+  "budget": {
+    "maxTokens": 50000,
+    "finalizeTokens": 2500
+  },
+  "sandbox": {
+    "domain": "http://127.0.0.1:8090",
+    "apiKeyEnv": "OPEN_SANDBOX_API_KEY",
+    "useServerProxy": true
+  },
+  "validatorModule": "../examples/charging-analysis/validator.ts",
+  "server": {
+    "tokenEnv": "ASR_RUNTIME_API_TOKEN",
+    "port": 8787
+  }
+}

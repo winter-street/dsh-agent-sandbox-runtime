@@ -1,0 +1,41 @@
+{
+  "total_alerts": 10,
+  "confirmed": 5,
+  "rejected": 2,
+  "pending": 3,
+  "false_positive_rate": 0.285714,
+  "devices": [
+    {
+      "device_id": "D01",
+      "total": 4,
+      "confirmed": 3
+    },
+    {
+      "device_id": "D02",
+      "total": 3,
+      "confirmed": 2
+    },
+    {
+      "device_id": "D03",
+      "total": 2,
+      "confirmed": 0
+    },
+    {
+      "device_id": "D04",
+      "total": 1,
+      "confirmed": 0
+    }
+  ],
+  "time_bands": {
+    "00-05": 3,
+    "06-11": 2,
+    "12-17": 2,
+    "18-23": 3
+  },
+  "severity": {
+    "high": 4,
+    "medium": 3,
+    "low": 3,
+    "unknown": 0
+  }
+}

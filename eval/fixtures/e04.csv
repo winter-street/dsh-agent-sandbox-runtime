@@ -1,0 +1,3 @@
+alert_id,device_id,occurred_at,severity,review_state
+E04A,D20,2026-11-01T06:00:00+08:00,high,confirmed
+E04B,D02,2026-11-01T06:00:00+08:00,high,pending

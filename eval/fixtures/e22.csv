@@ -1,0 +1,5 @@
+alert_id,device_id,occurred_at,severity,review_state
+N22A,"Campus,East",2026-11-12T23:59:59+08:00,low,confirmed
+N22B,设备-甲,2026-11-12T08:00:00+08:00,,
+N22C,设备-甲,2026-11-12T16:00:00+08:00,high,rejected
+N22D,"Campus,East",2026-11-12T04:00:00+08:00,medium,pending

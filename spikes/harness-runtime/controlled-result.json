@@ -1,0 +1,94 @@
+{
+  "checkedAt": "2026-11-16T21:08:46.094Z",
+  "mode": "controlled",
+  "runId": "harness-c264499a-04b4-417d-afc2-f983c1722e2e",
+  "realSandbox": true,
+  "provider": "deterministic local adapter; synthetic token usage; no external model",
+  "metering": "synthetic usage for accounting integration only",
+  "monetaryCost": null,
+  "monetaryCostNote": "No currency conversion or invoice reconciliation. Token total is not currency cost; provider pricing and cache discounts are not modeled.",
+  "limits": {
+    "maxProviderCalls": 4,
+    "outputCapPerCall": 1024,
+    "totalTokenBudget": 50000,
+    "sandboxTtlSeconds": 300
+  },
+  "checks": [
+    {
+      "name": "real-agent-loop-to-runtime-service-to-opensandbox",
+      "passed": true,
+      "sandboxId": "0d1572f3-5fc3-4b04-8f11-2ecc155cc09b",
+      "attemptId": "57783234-f1e1-411d-ae57-359a163adf5a"
+    },
+    {
+      "name": "root-child-share-original-budget",
+      "passed": true
+    },
+    {
+      "name": "original-budget-plugin-automatically-settles-each-call-once",
+      "passed": true,
+      "calls": 3,
+      "usedTokens": 48
+    },
+    {
+      "name": "independent-host-artifact-validator-and-finalization",
+      "passed": true
+    },
+    {
+      "name": "runtime-sqlite-reopen-preserves-receipt-cursor",
+      "passed": true,
+      "cursor": 11
+    }
+  ],
+  "runtimeIdentity": {
+    "schemaVersion": 1,
+    "codeHash": "6ae05c46db2b342901e0b372ce4a5a486eca6e2ae187f0636119c2ffbb2836c1",
+    "configHash": "8fb58bcd35fec1c981b578db8b4ae8600bc1d71c41aa253aef346b73eebfd05e"
+  },
+  "budget": {
+    "limitTokens": 50000,
+    "usedTokens": 48,
+    "reservedTokens": 0,
+    "availableTokens": 49952,
+    "scopeKey": "harness-c264499a-04b4-417d-afc2-f983c1722e2e-root",
+    "ledgerSeq": 11,
+    "unknownCalls": 0,
+    "exhausted": false,
+    "meteringComplete": true,
+    "usage": {
+      "inputTokens": 32,
+      "cacheReadTokens": 0,
+      "cacheWriteTokens": 0,
+      "outputTokens": 16
+    },
+    "work": {
+      "limitTokens": 47500,
+      "usedTokens": 48,
+      "reservedTokens": 0,
+      "availableTokens": 47452
+    },
+    "finalize": {
+      "limitTokens": 2500,
+      "usedTokens": 0,
+      "reservedTokens": 0,
+      "availableTokens": 2500
+    }
+  },
+  "providerCalls": 3,
+  "finalStatus": "SUCCEEDED",
+  "artifacts": [
+    {
+      "artifactId": "90809574-4b6e-4a27-8aa3-0925925f2110",
+      "path": "result.json",
+      "sha256": "9dc6d101e9569a085108fa44b9c2bf14ae3bc13fb89f00a1cd634b3fd538b0d4",
+      "size": 10
+    }
+  ],
+  "passed": true,
+  "limitations": [
+    "No provider-native SSE disconnect or error/billing matrix was run.",
+    "Receipt recovery closes/reopens SQLite in one process; no full process-kill or Harness Loader profile resume is claimed.",
+    "No currency price table or invoice reconciliation was implemented.",
+    "Provider usage is synthetic. No external model inference or provider billing was tested."
+  ]
+}

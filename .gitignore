@@ -3,6 +3,7 @@ dist/
 coverage/
 .runtime/
 .sources/
+.pnpm-store/
 tmp/
 .env
 .env.*

@@ -1,0 +1,53 @@
+# Agent Sandbox Runtime bundle patch.
+# The runtime plugin row injects into the desktop profile's Loader tree.
+- insert:
+    - id: agent-sandbox-runtime
+      name: agent-sandbox-runtime
+      config:
+        dataDir: ~/.dsh/agent-sandbox-runtime
+        sandbox:
+          domain: http://127.0.0.1:8090
+          apiKeyFile: ~/.dsh/agent-sandbox-runtime/sandbox-api-key.txt
+          useServerProxy: true
+          image: python:3.11-slim@sha256:07d4824036af339fa1b6ef769cc99d9c10a141769538b52b3b597c84f7a7b535
+          ttlSeconds: 600
+          commandTimeoutMs: 60000
+        budget:
+          finalizeTokens: 0
+        # Control surfaces are opt-in. By default a conversation is never
+        # stopped by policy, deadline or tool caps; the plugin UI is where a
+        # user turns governance on for the conversations they choose.
+        run:
+          deadlineSeconds: 0
+        tool:
+          warnAt: 100000
+          maxCalls: 100000
+          warnNoProgressAt: 100000
+          stopNoProgressAt: 100000
+        policy:
+          mode: observe
+        validation:
+          requiredFiles:
+            - statistics.json
+            - report.md
+          chart: true
+          statisticsFile: statistics.json
+          statisticsFields:
+            - total_alerts
+            - confirmed
+            - rejected
+            - pending
+            - false_positive_rate
+            - devices
+            - time_bands
+            - severity
+        inputs:
+          - path: input.csv
+            file: D:/1GISwork/11-OPENSANDBOX+runtime/examples/charging-analysis/normal.csv
+        inputLimits:
+          maxFiles: 20
+          maxBytesPerFile: 16777216
+          maxTotalBytes: 33554432
+        approval:
+          mode: none
+          reason: ''

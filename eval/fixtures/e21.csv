@@ -1,0 +1,9 @@
+alert_id,device_id,occurred_at,severity,review_state
+N21A,North-01,2026-11-10T00:15:00+08:00,high,confirmed
+N21B,North-01,2026-11-10T06:20:00+08:00,medium,rejected
+N21C,North-01,2026-11-10T12:30:00+08:00,low,pending
+N21D,North-02,2026-11-10T18:45:00+08:00,high,confirmed
+N21E,North-02,2026-11-11T01:05:00+08:00,medium,rejected
+N21F,North-02,2026-11-11T07:10:00+08:00,low,confirmed
+N21G,North-03,2026-11-11T13:25:00+08:00,high,pending
+N21H,North-03,2026-11-11T19:40:00+08:00,medium,rejected

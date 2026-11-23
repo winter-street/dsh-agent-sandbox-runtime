@@ -1,0 +1,2 @@
+alert_id,device_id,occurred_at,severity,review_state
+B02,D01,not-a-timestamp,high,confirmed

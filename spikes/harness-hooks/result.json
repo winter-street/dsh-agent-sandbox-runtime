@@ -1,0 +1,325 @@
+{
+  "probeVersion": 1,
+  "node": "v22.22.2",
+  "scope": "published Harness 0.1.0-rc.6 modules; local deterministic adapter; no external model",
+  "checks": [
+    {
+      "name": "real agent loop, tool registry, frozen stream, logged output cap",
+      "passed": true
+    },
+    {
+      "name": "child request session attribution and persisted parent lineage",
+      "passed": true
+    },
+    {
+      "name": "throw normalizes error while preserving missing usage",
+      "passed": true
+    },
+    {
+      "name": "partial normalizes error while preserving missing usage",
+      "passed": true
+    },
+    {
+      "name": "agent cancellation reaches adapter signal and ends unknown usage",
+      "passed": true
+    },
+    {
+      "name": "JSONL flush, dispose, resume same session and preserve message identities",
+      "passed": true
+    },
+    {
+      "name": "tool registration disposer removes contribution",
+      "passed": true
+    },
+    {
+      "name": "agent handles and root fiber effects dispose cleanly",
+      "passed": true
+    }
+  ],
+  "requests": [
+    {
+      "sessionId": "probe-root",
+      "model": "tool",
+      "maxTokens": 128,
+      "frozen": true
+    },
+    {
+      "sessionId": "probe-root",
+      "model": "tool",
+      "maxTokens": 128,
+      "frozen": true
+    },
+    {
+      "sessionId": "probe-child",
+      "model": "normal",
+      "maxTokens": 128,
+      "frozen": true
+    },
+    {
+      "sessionId": "probe-throw",
+      "model": "throw",
+      "maxTokens": 128,
+      "frozen": true
+    },
+    {
+      "sessionId": "probe-partial",
+      "model": "partial",
+      "maxTokens": 128,
+      "frozen": true
+    },
+    {
+      "sessionId": "probe-abort",
+      "model": "abort",
+      "maxTokens": 128,
+      "frozen": true
+    },
+    {
+      "sessionId": "probe-root",
+      "model": "normal",
+      "maxTokens": 128,
+      "frozen": true
+    }
+  ],
+  "events": [
+    {
+      "type": "agent.session-start",
+      "sessionId": "probe-root",
+      "source": "startup"
+    },
+    {
+      "type": "agent.request",
+      "sessionId": "probe-root",
+      "maxTokensBefore": 400
+    },
+    {
+      "type": "stream.before",
+      "callId": "probe-stream-1",
+      "sessionId": "probe-root",
+      "purpose": "conversation",
+      "frozen": true
+    },
+    {
+      "type": "adapter.started",
+      "sessionId": "probe-root",
+      "model": "tool"
+    },
+    {
+      "type": "stream.finally",
+      "callId": "probe-stream-1",
+      "sessionId": "probe-root",
+      "finish": "tool-calls",
+      "accounting": "known",
+      "usage": {
+        "inputTokens": 12,
+        "outputTokens": 8,
+        "cacheReadTokens": 2
+      }
+    },
+    {
+      "type": "tool.execute",
+      "sessionId": "probe-root",
+      "callId": "probe-tool-call",
+      "rootCallId": "probe-tool-call"
+    },
+    {
+      "type": "agent.request",
+      "sessionId": "probe-root",
+      "maxTokensBefore": 128
+    },
+    {
+      "type": "stream.before",
+      "callId": "probe-stream-2",
+      "sessionId": "probe-root",
+      "purpose": "conversation",
+      "frozen": true
+    },
+    {
+      "type": "adapter.started",
+      "sessionId": "probe-root",
+      "model": "tool"
+    },
+    {
+      "type": "stream.finally",
+      "callId": "probe-stream-2",
+      "sessionId": "probe-root",
+      "finish": "stop",
+      "accounting": "known",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 4,
+        "cacheReadTokens": 2
+      }
+    },
+    {
+      "type": "agent.session-start",
+      "sessionId": "probe-child",
+      "source": "startup"
+    },
+    {
+      "type": "agent.request",
+      "sessionId": "probe-child",
+      "maxTokensBefore": 400
+    },
+    {
+      "type": "stream.before",
+      "callId": "probe-stream-3",
+      "sessionId": "probe-child",
+      "purpose": "conversation",
+      "frozen": true
+    },
+    {
+      "type": "adapter.started",
+      "sessionId": "probe-child",
+      "model": "normal"
+    },
+    {
+      "type": "stream.finally",
+      "callId": "probe-stream-3",
+      "sessionId": "probe-child",
+      "finish": "stop",
+      "accounting": "known",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 4,
+        "cacheReadTokens": 2
+      }
+    },
+    {
+      "type": "agent.session-start",
+      "sessionId": "probe-throw",
+      "source": "startup"
+    },
+    {
+      "type": "agent.request",
+      "sessionId": "probe-throw",
+      "maxTokensBefore": 400
+    },
+    {
+      "type": "stream.before",
+      "callId": "probe-stream-4",
+      "sessionId": "probe-throw",
+      "purpose": "conversation",
+      "frozen": true
+    },
+    {
+      "type": "adapter.started",
+      "sessionId": "probe-throw",
+      "model": "throw"
+    },
+    {
+      "type": "stream.finally",
+      "callId": "probe-stream-4",
+      "sessionId": "probe-throw",
+      "finish": "error",
+      "accounting": "unknown"
+    },
+    {
+      "type": "agent.request-error",
+      "sessionId": "probe-throw",
+      "failureCode": "UNKNOWN"
+    },
+    {
+      "type": "agent.session-start",
+      "sessionId": "probe-partial",
+      "source": "startup"
+    },
+    {
+      "type": "agent.request",
+      "sessionId": "probe-partial",
+      "maxTokensBefore": 400
+    },
+    {
+      "type": "stream.before",
+      "callId": "probe-stream-5",
+      "sessionId": "probe-partial",
+      "purpose": "conversation",
+      "frozen": true
+    },
+    {
+      "type": "adapter.started",
+      "sessionId": "probe-partial",
+      "model": "partial"
+    },
+    {
+      "type": "stream.finally",
+      "callId": "probe-stream-5",
+      "sessionId": "probe-partial",
+      "finish": "error",
+      "accounting": "unknown"
+    },
+    {
+      "type": "agent.request-error",
+      "sessionId": "probe-partial",
+      "failureCode": "UNKNOWN"
+    },
+    {
+      "type": "agent.session-start",
+      "sessionId": "probe-abort",
+      "source": "startup"
+    },
+    {
+      "type": "agent.request",
+      "sessionId": "probe-abort",
+      "maxTokensBefore": 400
+    },
+    {
+      "type": "stream.before",
+      "callId": "probe-stream-6",
+      "sessionId": "probe-abort",
+      "purpose": "conversation",
+      "frozen": true
+    },
+    {
+      "type": "adapter.started",
+      "sessionId": "probe-abort",
+      "model": "abort"
+    },
+    {
+      "type": "stream.finally",
+      "callId": "probe-stream-6",
+      "sessionId": "probe-abort",
+      "finish": "aborted",
+      "accounting": "unknown"
+    },
+    {
+      "type": "agent.session-start",
+      "sessionId": "probe-root",
+      "source": "resume"
+    },
+    {
+      "type": "agent.request",
+      "sessionId": "probe-root",
+      "maxTokensBefore": 400
+    },
+    {
+      "type": "stream.before",
+      "callId": "probe-stream-7",
+      "sessionId": "probe-root",
+      "purpose": "conversation",
+      "frozen": true
+    },
+    {
+      "type": "adapter.started",
+      "sessionId": "probe-root",
+      "model": "normal"
+    },
+    {
+      "type": "stream.finally",
+      "callId": "probe-stream-7",
+      "sessionId": "probe-root",
+      "finish": "stop",
+      "accounting": "known",
+      "usage": {
+        "inputTokens": 10,
+        "outputTokens": 4,
+        "cacheReadTokens": 2
+      }
+    }
+  ],
+  "limitations": [
+    "No external provider billing checked.",
+    "No OpenSandbox execution in this probe.",
+    "No budget service integrated in this probe.",
+    "Process crash recovery and Loader profile launch remain separate integration work."
+  ]
+}

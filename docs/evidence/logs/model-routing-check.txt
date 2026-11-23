@@ -1,0 +1,11 @@
+
+ RUN  v4.0.18 D:/1GISwork/11-OPENSANDBOX+runtime
+
+ ✓ tests/models/router.test.ts (18 tests) 22ms
+ ✓ tests/models/harness.test.ts (3 tests) 156ms
+
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+   Start at  11:29:54
+   Duration  544ms (transform 126ms, setup 0ms, import 368ms, tests 178ms, environment 0ms)
+

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "runtimeConfigPath": "example.json",
+  "dataDir": "../.runtime/application-serial",
+  "model": {
+    "provider": "deepseek",
+    "name": "deepseek-chat",
+    "apiKeyEnv": "DEEPSEEK_API_KEY",
+    "thinking": "disabled",
+    "maxOutputTokens": 8192
+  },
+  "budget": {
+    "maxTokens": 50000,
+    "finalizeTokens": 2500
+  },
+  "sandbox": {
+    "domain": "http://127.0.0.1:8090",
+    "apiKeyEnv": "OPEN_SANDBOX_API_KEY",
+    "useServerProxy": true
+  },
+  "workflow": {
+    "mode": "serial",
+    "maxRepairs": 1,
+    "approval": { "reason": "Review generated Python before sandbox execution", "ttlMs": 300000 },
+    "retry": { "maxAttempts": 2, "baseDelayMs": 250, "maxDelayMs": 1000 },
+    "context": {
+      "modelWindowTokens": 32768,
+      "safetyReserveTokens": 512,
+      "summary": { "triggerRatio": 0.75, "maxOutputTokens": 512 }
+    },
+    "reference": { "key": "ranking" }
+  },
+  "validatorModule": "../examples/charging-analysis/validator.ts",
+  "server": { "tokenEnv": "ASR_RUNTIME_API_TOKEN", "port": 8787 }
+}

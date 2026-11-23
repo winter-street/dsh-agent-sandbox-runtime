@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Agent 沙箱运行时",
+    "description": "把 Python 工具调用放进隔离的 OpenSandbox 容器执行，提供持久化 run、已提交产物与独立验收。",
+    "detail": "docs/DETAIL.md"
+  }
+}

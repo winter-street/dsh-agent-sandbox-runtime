@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "charging-analysis-n05-reserved-v1",
+  "phase": "reserved-offline-comparison",
+  "frozenForFinalEvaluation": false,
+  "expectedOrigin": "Independently reserved inputs for offline runner, sharding and budget comparison checks",
+  "referenceSha256": "955d536117db8adebf723146b5dd6b4831eb2c7a8f09b04226ca3326739d817c",
+  "taskPrompt": "TASK-N05.md",
+  "taskPromptSha256": "e95ac5f4197a512a1ef1562f909504df43a3b5e9456b6355a7df6cbd8b15120a",
+  "tasks": [
+    {
+      "id": "e21",
+      "split": "evaluation",
+      "title": "N05 reserved: balanced multi-device workload",
+      "input": "fixtures/e21.csv",
+      "inputSha256": "91997bc1f2b2fd690ede824b1995d65512cac44a30fac2729b51e19607e0e1ee",
+      "expectedStatistics": {
+        "total_alerts": 8,
+        "confirmed": 3,
+        "rejected": 3,
+        "pending": 2,
+        "false_positive_rate": 0.5,
+        "devices": [
+          {"device_id": "North-01", "total": 3, "confirmed": 1},
+          {"device_id": "North-02", "total": 3, "confirmed": 2},
+          {"device_id": "North-03", "total": 2, "confirmed": 0}
+        ],
+        "time_bands": {"00-05": 2, "06-11": 2, "12-17": 2, "18-23": 2},
+        "severity": {"high": 3, "medium": 3, "low": 2, "unknown": 0}
+      },
+      "requiredChecks": ["statistics", "report", "chart"]
+    },
+    {
+      "id": "e22",
+      "split": "evaluation",
+      "title": "N05 reserved: quoted and missing optional values",
+      "input": "fixtures/e22.csv",
+      "inputSha256": "53742b7c767767fb7ef4e5cace838275ce872d8b85c17d7fbba7445a1019d7f7",
+      "expectedStatistics": {
+        "total_alerts": 4,
+        "confirmed": 1,
+        "rejected": 1,
+        "pending": 2,
+        "false_positive_rate": 0.5,
+        "devices": [
+          {"device_id": "Campus,East", "total": 2, "confirmed": 1},
+          {"device_id": "设备-甲", "total": 2, "confirmed": 0}
+        ],
+        "time_bands": {"00-05": 1, "06-11": 1, "12-17": 1, "18-23": 1},
+        "severity": {"high": 1, "medium": 1, "low": 1, "unknown": 1}
+      },
+      "requiredChecks": ["statistics", "report", "chart"]
+    },
+    {
+      "id": "e23",
+      "split": "evaluation",
+      "title": "N05 reserved: schema error without fabricated analysis",
+      "input": "fixtures/e23.csv",
+      "inputSha256": "ba1ae02a7d14d8add837f0beae596421e699230149d227d2b0a35c1168af3452",
+      "expectedStatistics": {"error": "MISSING_COLUMN"},
+      "requiredChecks": ["statistics"]
+    }
+  ]
+}

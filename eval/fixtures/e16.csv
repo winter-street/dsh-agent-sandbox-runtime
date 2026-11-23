@@ -1,0 +1,3 @@
+alert_id,device_id,occurred_at,severity,review_state
+E16A,设备甲,2026-11-01T06:00:00+08:00,high,confirmed
+E16B,设备乙,2026-11-01T06:00:00+08:00,high,rejected

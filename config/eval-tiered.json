@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "runtimeConfigPath": "runtime-tiered.json",
+  "dataDir": "../.runtime/evaluation/tiered",
+  "model": { "provider": "deepseek", "name": "deepseek-flash", "apiKeyEnv": "DEEPSEEK_API_KEY", "thinking": "disabled", "maxOutputTokens": 8192 },
+  "budget": { "maxTokens": 50000, "finalizeTokens": 0 },
+  "sandbox": { "domain": "http://127.0.0.1:8090", "apiKeyEnv": "OPEN_SANDBOX_API_KEY", "useServerProxy": true },
+  "validatorModule": "../examples/charging-analysis/validator.ts"
+}

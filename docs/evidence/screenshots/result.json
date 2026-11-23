@@ -1,0 +1,27 @@
+{
+  "date": "2026-11-16T16:51:59.625Z",
+  "browser": "157.0.8103.52",
+  "actualHttp": true,
+  "actualSqlite": true,
+  "actualArtifactDownload": true,
+  "actualModel": false,
+  "actualSandbox": false,
+  "processRestart": false,
+  "checks": [
+    "create",
+    "view",
+    "budget and policy reasons",
+    "download exact CSV",
+    "resume",
+    "offline SSE replay",
+    "reload and reauthenticate",
+    "partial",
+    "succeeded",
+    "refresh list and selection",
+    "cancel",
+    "approval",
+    "stale selection response",
+    "mobile overflow"
+  ],
+  "screenshots": 5
+}

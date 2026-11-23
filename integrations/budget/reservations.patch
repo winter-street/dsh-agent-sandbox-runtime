@@ -1,0 +1,3046 @@
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..65cec79
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1 @@
++*.mjs text eol=lf
+diff --git a/README.md b/README.md
+index 376d911..3adbd1e 100644
+--- a/README.md
++++ b/README.md
+@@ -63,12 +63,15 @@ The package declares `dsh.bundle`, so `dsh plugin` adds it to the profile's
+     - id: agent-budget
+       name: dsh-plugin-agent-budget
+       config:
+-        maxTokens: 200000
+         missingUsage: exhaust
+         scope: tree
+ ```
+ 
+-`maxTokens` is required and must be a positive safe integer. `missingUsage`
++`maxTokens` is optional. Omit it to leave every conversation unlocked: a scope
++then opens at the safe-integer ceiling, which reservations can never exhaust,
++and the settings page decides which conversations get locked. When present it
++must be a positive safe integer and becomes the ceiling of each newly opened
++scope. `missingUsage`
+ defaults to `exhaust`; set it to `ignore` only when a provider intentionally
+ omits usage and you accept incomplete enforcement. `scope` defaults to `tree`;
+ set it to `session` for one independent budget per session. `storageDir` is
+@@ -92,6 +95,10 @@ its limit. Every knob is opt-in except the pressure prompt:
+   self-throttles before hitting the hard limit. It rides the optional
+   `@deepseek-ai/dsh-system-prompt` peer; compositions without it load
+   unchanged.
++- `requestMaxTokens`: hard output cap written into calls that do not set their
++  own `maxTokens`. Leave it unset (the default) to keep the caller's bound —
++  DSH's own default, often the model maximum — and cap only the reservation
++  estimate.
+ 
+ Degradation uses the `agent/request` waterfall because `llm/stream` requests
+ are deep-frozen by the loop and cannot be rewritten there. Controls never
+@@ -108,6 +115,35 @@ The plugin exports four named members and **no default export**:
+ 
+ ## Model Experience
+ 
++### Optional reservation protocol
++
++Set `reservationMode: true` to reserve estimated input plus a bounded output before
++each model dispatch. The request must have a `sessionId`. When it also sets
++`maxTokens`, that bound feeds the estimate; otherwise the estimate assumes an
++8192-token allowance and the call keeps whatever bound the caller chose, so the
++plugin never shortens a response on its own. Set `requestMaxTokens` to impose a
++hard output cap on calls that do not set their own. The stream hook never
++mutates the frozen request.
++
++The input estimate is UTF-8 JSON bytes / 3 plus a 256-token margin, including
++system prompt, messages and tool schemas. This is not a tokenizer or a billing
++guarantee: final actual usage is recorded in full even above the estimate.
++Calls without final usage hold their reservation and pause new calls for that
++scope. `missingUsage: ignore` does not override this reservation invariant.
++
++Trusted host plugins may inject `agentBudget` and use `scopeForSession`,
++`snapshot`, `reserve`, `markDispatched`, `settle`, `releaseUnsent`, `markUnknown`
++and `eventsAfter`. Operator/runtime code can allocate a `finalize` allowance
++within the total and invoke a complete async call inside
++`withPurpose(sessionId, 'finalize', callback)`. This context is not a model tool
++argument. Do not reserve a call manually and then send it through the automatic
++reservation hook: use one owner per call.
++
++The new version-2 records share the original ledger and writer lock. First
++version-2 write backs up the original ledger as `ledger.v1-backup.jsonl`.
++See `SECURITY.md` before upgrading or downgrading. Host-module tests use a
++controlled provider; remote-provider compatibility still needs a real smoke.
++
+ The model can call the read-only `budget_status` tool. It returns the limit,
+ used and remaining tokens, exhaustion state, all four usage buckets,
+ `meteringComplete`, and `unmeteredCalls`. It cannot change the limit.
+@@ -115,8 +151,11 @@ used and remaining tokens, exhaustion state, all four usage buckets,
+ ## Settings panel and HTTP API
+ 
+ The web client registers a `Token 预算` section in Settings. It lists every
+-open budget scope, shows limit/used/remaining/exhausted state with a progress
+-bar, and polls every 30 seconds.
++open budget scope (one per conversation tree), shows `无限制` / `已上锁` /
++`已耗尽` with a progress bar, and polls every 30 seconds. Conversations start
++unlocked; each row locks one conversation to a token ceiling
++(`锁定此对话` / `调整上限`), removes the ceiling again (`解除限制`), or clears
++its usage (`重置用量`).
+ 
+ Host HTTP API under `/agent-budget/api`:
+ 
+@@ -125,9 +164,9 @@ and `X-Agent-Budget-Request: 1`; bodies are limited to 16 KiB. Cross-origin
+ requests are rejected. An active scope cannot be reset (HTTP 409).
+ See [SECURITY.md](SECURITY.md) for access and recovery instructions.
+ 
+-- `GET /scopes` → `{ ok, scopes: [{ scopeKey, limitTokens, usedTokens, ... }] }`
++- `GET /scopes` → `{ ok, scopes: [{ scopeKey, limitTokens, usedTokens, unlimited, ... }] }`
+ - `POST /adjust-limit` with `{ scopeKey, limitTokens }` → overwrites the scope's
+-  limit
++  limit; `{ scopeKey, unlimited: true }` removes it (safe-integer ceiling)
+ - `POST /reset` with `{ scopeKey }` → clears usage but keeps the current limit
+ 
+ `adjust` and `reset` are appended to the sidecar ledger as new event lines.
+@@ -205,10 +244,11 @@ Stop DSH processes that use the affected profile before running it.
+ - Verified against DSH `0.1.0-rc.6`. When upgrading DSH, re-check: the
+   `llm/stream` hook signature, the `agent/request-error` payload shape, and the
+   `ctx.agents` runtime ownership API.
+-- Concurrent admission can overshoot the limit by design (see Semantics); set
+-  `maxConcurrentCalls` to bound it.
+-- Metering is fail-closed by default: providers that intentionally omit usage
+-  need `missingUsage: 'ignore'`.
++- Legacy concurrent admission can overshoot the limit by design (see
++  Semantics). Optional reservation mode atomically checks estimated capacity,
++  but actual use can exceed an estimate; set `maxConcurrentCalls` as well.
++- Legacy metering can opt into `missingUsage: 'ignore'`. Reservation mode
++  always holds unknown usage and blocks further calls until reconciliation.
+ 
+ ## Repository layout
+ 
+diff --git a/README.zh.md b/README.zh.md
+index 81509e1..d294da6 100644
+--- a/README.zh.md
++++ b/README.zh.md
+@@ -54,12 +54,13 @@ allowBuilds:
+     - id: agent-budget
+       name: dsh-plugin-agent-budget
+       config:
+-        maxTokens: 200000
+         missingUsage: exhaust
+         scope: tree
+ ```
+ 
+-`maxTokens` 必填，且必须是正安全整数。`missingUsage` 默认为 `exhaust`；只有当 provider
++`maxTokens` 可选：不写就是「初始无限制」——每个 scope 以安全整数上限开启，
++reservation 永远耗不尽，由设置页决定给哪些对话上锁。写了就必须是正安全整数，
++并成为此后新开 scope 的上限。`missingUsage` 默认为 `exhaust`；只有当 provider
+ 明确不返回 usage、并且你能接受预算统计不完整时，才建议设为 `ignore`。
+ `scope` 默认为 `tree`；`session` 会让每个 Session 独立计费。
+ `storageDir` 可选，默认是 `~/.dsh/agent-budget/`。
+@@ -97,8 +98,10 @@ usage、`meteringComplete` 和 `unmeteredCalls`。工具不能修改预算。
+ 
+ ## 设置页与 HTTP API
+ 
+-Web client 会在设置页注册 `Token 预算` 面板：列出所有已开启的预算 scope，
+-展示 limit/used/remaining/exhausted 与进度条，每 30 秒轮询刷新。
++Web client 会在设置页注册 `Token 预算` 面板：列出所有已开启的预算 scope
++（每个对话树一条），以 `无限制` / `已上锁` / `已耗尽` 标记状态并显示进度条，
++每 30 秒轮询刷新。对话默认无限制；每行的按钮把该对话锁到一个 token 上限
++（`锁定此对话` / `调整上限`）、解除上限（`解除限制`）或清零用量（`重置用量`）。
+ 
+ Host HTTP API 位于 `/agent-budget/api`：
+ 
+diff --git a/SECURITY.md b/SECURITY.md
+index 1e34737..02a4a38 100644
+--- a/SECURITY.md
++++ b/SECURITY.md
+@@ -49,8 +49,9 @@ files; the CLI exits unsuccessfully if any files were skipped.
+ 
+ ## Remaining Limits
+ 
+-- Concurrent admitted calls can exceed a limit; this is settled accounting,
+-  without a token reservation mechanism.
++- Legacy mode admits against settled usage. Optional reservation mode adds
++  atomic estimated reservations, but actual use can exceed an estimate and is
++  recorded without clipping. It is not an absolute billing cap.
+ - Unknown tree ownership can still fall back to independent scopes.
+ - Synchronous append/flush and full ledger replay favor durability over
+   throughput. Very large ledgers need offline archival planning.
+@@ -58,6 +59,45 @@ files; the CLI exits unsuccessfully if any files were skipped.
+   hardware, or power failure. Keep backups.
+ - `missingUsage: ignore` explicitly accepts incomplete provider accounting.
+ 
++## Reservation protocol upgrade
++
++Version-2 reserve/dispatch/settle/unknown/release/allocate records reuse the same
++single writer and append-only ledger. Before first v2 write, the implementation
++copies the existing v1 history to `ledger.v1-backup.jsonl`; operators must also
++back up the entire storage directory while stopped. The original 0.4.0 reader
++rejects v2 versions. Never strip v2 lines to make an old writer start: doing so
++loses obligations and can grant already-consumed credit again.
++
++Downgrade only after stopping all writers, settling/reconciling outstanding
++calls, preserving the full new history, and explicitly restoring a verified
++compatible backup. A backup predates subsequent consumption; reconcile that
++consumption before resuming old software. Do not restore a backup as a way to
++reset budget during task recovery.
++
++Dispatch intent is durable before sending a provider request. On restart it
++becomes unknown, retains its reservation, and blocks new model calls until
++authoritative usage is settled. A request that may have reached the provider
++cannot be released as unsent. The process writer lock still requires confirming
++that its recorded PID is dead before removing a stale lease.
++
++For local process-crash recovery, use the explicit checked command:
++
++```sh
++node scripts/recover-writer-lock.mjs --dir <storage-directory> --expected-pid <recorded-pid>
++```
++
++It requires a matching regular lock file and an ESRCH liveness result before
++removing that lock. EPERM, a live/reused PID, malformed identity and a concurrent
++recovery guard all fail closed. The command never modifies ledger or index
++contents. This is for a local machine/filesystem only; PID checks do not prove
++ownership on shared network storage or across containers. Interrupted recovery
++guards require offline inspection, and there must be no concurrent manual lock
++deletion. Successful lock recovery still leaves dispatched usage unknown until
++authoritative settlement; it does not make a budget available by itself.
++
++The service is trusted host code, not an authorization boundary against hostile
++plugins. Never register budget mutation or `withPurpose` as model-callable tools.
++
+ ## Reporting
+ 
+ Report reproducible security issues privately to the repository maintainer
+diff --git a/cordis.patch.yml b/cordis.patch.yml
+index 1ed3f5d..6149898 100644
+--- a/cordis.patch.yml
++++ b/cordis.patch.yml
+@@ -2,12 +2,14 @@
+     - id: agent-budget
+       name: dsh-plugin-agent-budget
+       config:
+-        maxTokens: 200000
++        # No maxTokens: every conversation opens unlocked; the settings page
++        # decides which conversations get a ceiling.
+         missingUsage: exhaust
+         scope: tree
++        reservationMode: true
++        pressurePrompt: false
++        maxConcurrentCalls: 2
+         # Control layer (all optional; see README "Control layer"):
+         # degradeRatio: 0.2        # tighten requests once <20% of the budget remains
+         # degradeModel: deepseek-chat
+         # maxOutputTokens: 4096
+-        # maxConcurrentCalls: 4
+-        # pressurePrompt: true     # default
+diff --git a/docs/design.md b/docs/design.md
+index 9afac0b..3e6a89e 100644
+--- a/docs/design.md
++++ b/docs/design.md
+@@ -177,3 +177,50 @@ numeric limits, synchronizes server updates, and ignores stale fetch results.
+ - Verified against DSH `0.1.0-rc.6`; when upgrading DSH, re-check the
+   `llm/stream` hook signature, the `agent/request-error` payload shape, and the
+   `ctx.agents` runtime ownership API.
++
++## Optional version-2 reservation protocol
++
++The preceding sample-based admission remains the default. This unreleased
++extension provides `ctx.get('agentBudget')` and enables automatic reservations
++with `reservationMode: true`. It retains the same JSONL owner and writer lock.
++
++The service offers scope resolution, snapshot, reserve, markDispatched, settle,
++releaseUnsent, markUnknown, eventsAfter, allocate and trusted withPurpose.
++Reserve atomically checks global and work/finalize capacity before a durable
++append; the first v2 append takes a v1 history backup. Model calls have one
++accounting owner. Automatic stream mode does not emit legacy samples, and
++manual callers must not reserve the same automatic call a second time.
++
++State transitions are reserved -> dispatched -> settled, with reserved ->
++released_unsent and dispatched -> unknown -> settled. Dispatch means a durable
++intent before sending, not an acknowledgement by the provider. Recovered
++dispatches become unknown. Unknown usage blocks new calls even if the legacy
++missingUsage option is ignore. Actual overshoot is recorded in full.
++
++The automatic estimate includes messages/system/tools UTF-8 bytes divided by
++three (rounded up), a 256-token margin and the explicit output cap. This is an
++estimate, not a tokenizer or guaranteed monetary cap. Requests lacking a
++session or output cap are rejected before dispatch. The agent/request hook can
++provide the default output cap (2048 or configured maxOutputTokens); final
++frozen llm/stream options are never mutated. Final cumulative usage is settled
++once only after stream completion; interrupted or unmetered streams remain
++unknown. Input/cache-read/cache-write/output are disjoint usage buckets.
++
++Finalize tokens are allocated within the global total. withPurpose uses a
++trusted asynchronous session context; the callback must consume the stream
++within that context. A model-supplied field cannot select finalize credit.
++Runtime policy separately restricts which finalization actions are permitted.
++
++eventsAfter uses the global ledger cursor, not a per-scope index. The runtime
++can persist receipts for notification recovery but must not recreate a balance.
++Snapshots and receipts are copies; duplicate settlement with equal usage is
++idempotent and conflicting final usage is rejected. Unknown schema versions,
++bad transitions and failed persistence stop further admission.
++
++Process-lock recovery is explicit: `node scripts/recover-writer-lock.mjs --dir
++<local-storage-directory> --expected-pid <dead-pid>`. It verifies the recorded
++identity, requires ESRCH for that PID and leaves all budget history intact.
++Live, reused, inaccessible or uncertain PIDs cannot be recovered this way.
++Use only a local filesystem/process namespace and stop other recovery actions.
++An interrupted recovery guard must be inspected offline; it is not auto-deleted.
++See SECURITY.md for upgrade and downgrade constraints.
+diff --git a/package.json b/package.json
+index a4552a3..89c5901 100644
+--- a/package.json
++++ b/package.json
+@@ -31,7 +31,6 @@
+     },
+     "client": {
+       "inject": [
+-        "@deepseek-ai/dsh-client-runtime",
+         "@deepseek-ai/dsh-client-ui-slots"
+       ],
+       "platform": "web"
+@@ -62,32 +61,29 @@
+   ],
+   "license": "MIT",
+   "engines": {
+-    "node": "^22.19.0 || >=24.0.0"
++    "node": "^22.19.0 || >=24.0.0",
++    "dsh": ">=0.2.2-rc.3 <0.3.0-0"
+   },
+   "packageManager": "pnpm@11.7.0",
+   "peerDependencies": {
+-    "@deepseek-ai/cordis": "^4.0.1",
+-    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6"
+-  },
+-  "peerDependenciesMeta": {
+-    "@deepseek-ai/dsh-system-prompt": {
+-      "optional": true
+-    }
++    "@deepseek-ai/cordis": ">=4.1.0 <5.0.0",
++    "@deepseek-ai/dsh-agent": ">=0.2.2-rc.3 <0.3.0-0",
++    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.3 <0.3.0-0",
++    "@deepseek-ai/dsh-session": ">=0.2.2-rc.3 <0.3.0-0",
++    "@deepseek-ai/dsh-system-prompt": ">=0.2.2-rc.3 <0.3.0-0",
++    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.3 <0.3.0-0"
+   },
+   "dependencies": {
+-    "@deepseek-ai/schemastery": "^3.18.1"
++    "@deepseek-ai/schemastery": "^3.19.0"
+   },
+   "devDependencies": {
+-    "@deepseek-ai/cordis": "^4.0.1",
+-    "@deepseek-ai/dsh-agent": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-llm": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-session": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.6",
+-    "@deepseek-ai/dsh-tools": "^0.1.0-rc.6",
++    "@deepseek-ai/cordis": "4.1.0",
++    "@deepseek-ai/dsh-agent": "0.2.2-rc.3",
++    "@deepseek-ai/dsh-llm": "0.2.2-rc.3",
++    "@deepseek-ai/dsh-session": "0.2.2-rc.3",
++    "@deepseek-ai/dsh-session-projection": "0.2.2-rc.3",
++    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.3",
++    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
+     "@types/node": "^22.20.0",
+     "@types/react": "^18.3.31",
+     "@types/react-dom": "^18.3.7",
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index c7f4b58..986e828 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -9,27 +9,30 @@ importers:
+   .:
+     dependencies:
+       '@deepseek-ai/schemastery':
+-        specifier: ^3.18.1
+-        version: 3.18.1
++        specifier: ^3.19.0
++        version: 3.19.0
+     devDependencies:
+       '@deepseek-ai/cordis':
+-        specifier: ^4.0.1
+-        version: 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
++        specifier: 4.1.0
++        version: 4.1.0
+       '@deepseek-ai/dsh-agent':
+-        specifier: ^0.1.0-rc.6
+-        version: 0.1.0-rc.6(1684446fc331419a339cbf09573762dc)
++        specifier: 0.2.2-rc.3
++        version: 0.2.2-rc.3(5a66ed30ebfeae025fb260d2c5c96077)
+       '@deepseek-ai/dsh-llm':
+-        specifier: ^0.1.0-rc.6
+-        version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
++        specifier: 0.2.2-rc.3
++        version: 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
+       '@deepseek-ai/dsh-session':
+-        specifier: ^0.1.0-rc.6
+-        version: 0.1.0-rc.6(8654e07265e08162f132469eb8f876b3)
++        specifier: 0.2.2-rc.3
++        version: 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-session-projection':
++        specifier: 0.2.2-rc.3
++        version: 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-session@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))
+       '@deepseek-ai/dsh-system-prompt':
+-        specifier: ^0.1.0-rc.6
+-        version: 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-llm@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-scope@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
++        specifier: 0.2.2-rc.3
++        version: 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
+       '@deepseek-ai/dsh-tools':
+-        specifier: ^0.1.0-rc.6
+-        version: 0.1.0-rc.6(0da30b280e19f63bb593aeacf97df8a0)
++        specifier: 0.2.2-rc.3
++        version: 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-agent@0.2.2-rc.3(5a66ed30ebfeae025fb260d2c5c96077))(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-session@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-system-prompt@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-user-approval@0.2.2-rc.3(106cb524db0a6912bf21e510c0c35f62))
+       '@types/node':
+         specifier: ^22.20.0
+         version: 22.20.0
+@@ -145,149 +148,122 @@ packages:
+     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
+     engines: {node: '>=20.19.0'}
+ 
+-  '@deepseek-ai/cordis-plugin-include@1.0.6':
+-    resolution: {integrity: sha512-i1VXrZCbv6tk/iUgedCNjrxxArbWT3IvRZGB5sdqJ3ectnihivXXQbRZ8JJ73DSmAPvlMGmrbtjFAfm10yvXRg==}
+-    peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/cordis-plugin-loader': ^1.0.2
+-
+-  '@deepseek-ai/cordis-plugin-loader@1.0.2':
+-    resolution: {integrity: sha512-RIW9hoVyhYDWdCI9BsvtZccPde1ECLC4OAxupwowGTak78vwVTVdb3HezTSOK1Y1/Ax3Ru0LA1pYOB04CnTxIQ==}
+-    peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      node-addon-require-builtin: ^0.1.4
+-    peerDependenciesMeta:
+-      node-addon-require-builtin:
+-        optional: true
+-
+-  '@deepseek-ai/cordis@4.0.1':
+-    resolution: {integrity: sha512-YBdskTU2Po1kru3GgcUWUbkTsPMA9LkSQDAY8rBkFJeajdgcQad3QPJZE26JyK99Xb6HaASvoXg2DSUTeN/0Nw==}
++  '@deepseek-ai/cordis@4.1.0':
++    resolution: {integrity: sha512-CJrjNyBkKn1SfvBQUcgFYKFnLjS+uKrhdMsbHU60xabvi12d+xQ+IQSNlME5Z+B+4Zi6n4BDknKY94tEPeo47w==}
+     hasBin: true
+     peerDependencies:
+-      '@deepseek-ai/cordis-plugin-include': ^1.0.6
+-      '@deepseek-ai/cordis-plugin-loader': ^1.0.2
++      '@deepseek-ai/cordis-plugin-include': ~1.1.0
++      '@deepseek-ai/cordis-plugin-loader': ~1.1.0
+     peerDependenciesMeta:
+       '@deepseek-ai/cordis-plugin-include':
+         optional: true
+       '@deepseek-ai/cordis-plugin-loader':
+         optional: true
+ 
+-  '@deepseek-ai/cosmokit@1.8.2':
+-    resolution: {integrity: sha512-muBOKtSrUKU5m/xpq8ZXWL6hQ/jgd4PhU2PqH97bcxIiLEJfNwZOGQEx4t/aS/GgxRAR+ra9pMHPMtTHU4sqqA==}
+-
+-  '@deepseek-ai/cosmokit@1.8.3':
+-    resolution: {integrity: sha512-qBo+ronVM6Eu2WNVJXi8JcMiqZ19T9BRIpV+5qJUFPXjGH/Z0QKcQMC/IZJ7L394YTOtJgcovbk9qP0w2GsBXQ==}
++  '@deepseek-ai/cosmokit@1.9.0':
++    resolution: {integrity: sha512-5O1S53mZiJyZYcvxxD0Qv1EY7qFPSxbGyD8CbVK6gw7W9FvcXZj2YIX1ZkOqyQQ3Xt2rFkZDHJv0+V3Zmmp8CA==}
+ 
+-  '@deepseek-ai/dsh-agent@0.1.0-rc.6':
+-    resolution: {integrity: sha512-vtqq2pWTrzn0dKfj5kREZRpP82AwtGjGx9V1lYnKvF+Uc/a8zyWbSvjDE7V1d3YQAQJzs2cWO31hURWDekDXIA==}
++  '@deepseek-ai/dsh-agent@0.2.2-rc.3':
++    resolution: {integrity: sha512-e8ZraO5pcjJh7JJrTpjT3DhGVYjjzZFEiAOnqpqZyUW+WT3hK84yaBqV+wgiqmUz+A43ucd8ilPzkq/yWEUaLA==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-llm': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-scope': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-session': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-system-prompt': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-typert-protocol': ^0.1.0-rc.6
+-
+-  '@deepseek-ai/dsh-attachment@0.1.0-rc.8':
+-    resolution: {integrity: sha512-cCrg4WWiav7pGtbdU8dJTpAG28cPnkWVB2YPOrlBCgBbhQziGcG9Dv67Ti6L3PI4OQKC55gYBFinQghFO/7FGg==}
+-    peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-brand': ^0.1.0-rc.8
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.8
++      '@deepseek-ai/cordis': ~4.1.0
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3
++      '@deepseek-ai/dsh-session-projection': 0.2.2-rc.3
++      '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.3
++      '@deepseek-ai/dsh-typert-protocol': 0.2.2-rc.3
++      '@deepseek-ai/dsh-util-values': 0.2.2-rc.3
++      '@deepseek-ai/dsh-workspace': 0.2.2-rc.3
++    peerDependenciesMeta:
++      '@deepseek-ai/dsh-workspace':
++        optional: true
+ 
+-  '@deepseek-ai/dsh-brand@0.1.0-rc.8':
+-    resolution: {integrity: sha512-402aUAfHxIZJrArBV4gDf0I/A/69A/By26FX6HTIOyFmCnB4wUBKh8jnglz1CorKWdZy8AKldAhh8HQhQEbGOQ==}
++  '@deepseek-ai/dsh-brand@0.2.2-rc.3':
++    resolution: {integrity: sha512-vX7Ugoqs9GTO/1r/R7K3wZ6Vq1erJHLPvzEr78yxMigCitM0PA4kBZ8i/WOZrsNTLUOu/OiiBqr9HW3CQ4jEww==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.8
++      '@deepseek-ai/cordis': ~4.1.0
+ 
+-  '@deepseek-ai/dsh-code-runtime@0.1.0-rc.6':
+-    resolution: {integrity: sha512-aw8D4IOeMo11A3uxQeE4LFoW3bvaQnVkGFqqtS+lsINDARrOCJHXLUgecoKpys+Lc5erZZ4UQDnymJmL4OCcKA==}
++  '@deepseek-ai/dsh-error@0.2.2-rc.3':
++    resolution: {integrity: sha512-yxbiGjg8Y3LRIwZZBG5juutzZbVAHRZOPGTlSXaMtdBbnY6wbeV2BAnVnP9bGLb+Si+GKhbbQCA23RV/9+FMUQ==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
++      '@deepseek-ai/cordis': ~4.1.0
+ 
+-  '@deepseek-ai/dsh-invariants@0.1.0-rc.6':
+-    resolution: {integrity: sha512-WfEfOi99a4cpOugRAHTBSTnesLieu3ist1q9PXDXFBHX++K1rAl9+sB7YrdnbB8LH0UOY532gS9xJUYU6w0SLw==}
++  '@deepseek-ai/dsh-llm@0.2.2-rc.3':
++    resolution: {integrity: sha512-WdpGURXwBmFchHE7k8o+PUtncjPjU4NNkpnv4lBWT02ZrA+2sIF0WwcU3L/g40QmT6C9yRtFEUe+2GhpzUcTWQ==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
++      '@deepseek-ai/cordis': ~4.1.0
++      '@deepseek-ai/dsh-error': 0.2.2-rc.3
+ 
+-  '@deepseek-ai/dsh-llm@0.1.0-rc.6':
+-    resolution: {integrity: sha512-kuFGC8bHlzGTwlRxQhXjf3CYWl8M4NzH+EYIkrW8rri4iMc9W53xrdvkil5No/DUlMm8g1u7GdeiWYFy0TMvtA==}
++  '@deepseek-ai/dsh-scope@0.2.2-rc.3':
++    resolution: {integrity: sha512-TVTdI+9rhGpDUAgoApgLt/Iyi4hq+S5Ml7zFZ1JPCXGaU5etc8FqpBfGaKB9ei3siCKfpw1PuFQGvDwgFxOZsw==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-attachment': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-brand': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-timeout': ^0.1.0-rc.6
+-
+-  '@deepseek-ai/dsh-scope@0.1.0-rc.6':
+-    resolution: {integrity: sha512-UlDLV4syLoJinNg9imhXrSAHrdaTa5Ff8gg46rzjFJGPUOhAk3DZff0hryT5OhrBi0A5Tj92qVpg2pRVvxnUzQ==}
++      '@deepseek-ai/cordis': ~4.1.0
++
++  '@deepseek-ai/dsh-session-projection@0.2.2-rc.3':
++    resolution: {integrity: sha512-lWBGpP4EvnV+1+2uzsEyxZSaBHVcoqHUaLcNdA/VyHDp8YmR0MOIcFleR2oPYKi90pyGgEp5XAxGsbpXwC569w==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
++      '@deepseek-ai/cordis': ~4.1.0
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3
+ 
+-  '@deepseek-ai/dsh-session@0.1.0-rc.6':
+-    resolution: {integrity: sha512-8tu8I6VWC7050GAUXWhcEWQw4pakALQc8TlhKr52m7Y4+kIKeNt3FBgP86PaGPBtpK0p5zUPRQNkFpzZbBdxyw==}
++  '@deepseek-ai/dsh-session@0.2.2-rc.3':
++    resolution: {integrity: sha512-OPrsoWwbzyrv7FpbtYs8bb/KBjBwY/1DUc7iAdXq33m/ON4bVn+OWKYeyOPLAVcP8LoNQhp26KdseG5x69OSBg==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-brand': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-llm': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-scope': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-typert-protocol': ^0.1.0-rc.6
+-
+-  '@deepseek-ai/dsh-system-prompt@0.1.0-rc.6':
+-    resolution: {integrity: sha512-E7g+XChh4q4/wX++v56z1pV4SA1Rtz42xkznLPPi9FlXrrzJxwHMOUzBZ9Rz3Y1kLhQ++HJG3ZatmNx3rjFilg==}
++      '@deepseek-ai/cordis': ~4.1.0
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3
++
++  '@deepseek-ai/dsh-system-prompt@0.2.2-rc.3':
++    resolution: {integrity: sha512-T/F5VSFLR8xj3/A5vkMPwCv0QjURSrNzKruVFPj8F3BYSc7mHTFVunbVXu0dF6iPukDhtDq+/wrQaUty6mLgZw==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-llm': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-scope': ^0.1.0-rc.6
++      '@deepseek-ai/cordis': ~4.1.0
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3
+ 
+-  '@deepseek-ai/dsh-timeout@0.1.0-rc.6':
+-    resolution: {integrity: sha512-CUean0fAnfsJVszFEip7PsU/S26W+JfDFfsza2dCtlw8n6xlkbHA9Gjxdk2aTwqDGCgXEPkRW7mYkdJ0n6FR7w==}
++  '@deepseek-ai/dsh-timeout@0.2.2-rc.3':
++    resolution: {integrity: sha512-Yi2FZmvSLYZQCCTEx5SH+IbA0WMyjT05dib7x9HYKMD7sDbgRLUgVS54ZgNSzkoBIK0GEaN5g9suwo8cs9gLxQ==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
++      '@deepseek-ai/cordis': ~4.1.0
+ 
+-  '@deepseek-ai/dsh-tools@0.1.0-rc.6':
+-    resolution: {integrity: sha512-Tu08EPK3JyK0iNjH4FGzu/1uADynNSS6SmwOLdfytUN0YNqwNuKFSt2OJUg19famNlTgy992DcHfDu0T+gLXFg==}
++  '@deepseek-ai/dsh-tools@0.2.2-rc.3':
++    resolution: {integrity: sha512-6IGKOJzAl41jyUB+TCNBmtb2NfAryhTfsXH17rQPukWQteluyvZRNjwJsPnTRYJE27s6TeojZReT5MJxi7iIyA==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-agent': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-code-runtime': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-llm': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-scope': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-session': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-system-prompt': ^0.1.0-rc.6
+-      '@deepseek-ai/dsh-user-approval': ^0.1.0-rc.6
+-
+-  '@deepseek-ai/dsh-typert-protocol@0.1.0-rc.8':
+-    resolution: {integrity: sha512-scwEAefRBL7gRpaXiEdiHRMvlr8dLmUbiEvy0LOAX/8X3FZBd/5tHQ/8lCppAQNTDZMI/LSiSMpu5XrFId+7cQ==}
++      '@deepseek-ai/cordis': ~4.1.0
++      '@deepseek-ai/dsh-agent': 0.2.2-rc.3
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3
++      '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.3
++      '@deepseek-ai/dsh-user-approval': 0.2.2-rc.3
++
++  '@deepseek-ai/dsh-typert-protocol@0.2.2-rc.3':
++    resolution: {integrity: sha512-CXn6ILbfWN4a6NMsnIPPq22iVaKAWPb9522l01o903BqNM+hLWbSNipQ7myIUBRv4wn0Zw8ZgYGy9yrmfU4Htw==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.8
++      '@deepseek-ai/cordis': ~4.1.0
+ 
+-  '@deepseek-ai/dsh-user-approval@0.1.0-rc.8':
+-    resolution: {integrity: sha512-6SFCxp7dgNFEyzQIcs5i9C+5djgXsAeV0iKmZUCLlcIeVM1chcCMHyGcoXlw8yyB14qFMrMs+TPvhvpu2WWxAw==}
++  '@deepseek-ai/dsh-user-approval@0.2.2-rc.3':
++    resolution: {integrity: sha512-1GyFfOsB5QfFdWs4Lb4/XkHfewE67cGzwAG3fRGzwR76mBtLsUVqvU0+sv8B+so6KdGCH+YdPU71Q8xs2ADTxw==}
++    peerDependencies:
++      '@deepseek-ai/cordis': ~4.1.0
++      '@deepseek-ai/dsh-agent': 0.2.2-rc.3
++      '@deepseek-ai/dsh-brand': 0.2.2-rc.3
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3
++      '@deepseek-ai/dsh-session-projection': 0.2.2-rc.3
++      '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.3
++
++  '@deepseek-ai/dsh-util-crypto@0.2.2-rc.3':
++    resolution: {integrity: sha512-T7EUGf331mGi4n9gjFhLw1oLQyzWzfkUepHR0FiY0WWWc9Z96LD9NBH9P3w3905SaDsb98L4H8BVLX62m+kZjg==}
+     peerDependencies:
+-      '@deepseek-ai/cordis': ^4.0.1
+-      '@deepseek-ai/dsh-agent': ^0.1.0-rc.8
+-      '@deepseek-ai/dsh-brand': ^0.1.0-rc.8
+-      '@deepseek-ai/dsh-invariants': ^0.1.0-rc.8
+-      '@deepseek-ai/dsh-llm': ^0.1.0-rc.8
+-      '@deepseek-ai/dsh-scope': ^0.1.0-rc.8
+-      '@deepseek-ai/dsh-session': ^0.1.0-rc.8
+-      '@deepseek-ai/dsh-system-prompt': ^0.1.0-rc.8
++      '@deepseek-ai/cordis': ~4.1.0
+ 
+-  '@deepseek-ai/schemastery@3.18.1':
+-    resolution: {integrity: sha512-Qn0FCSwCQnpnj6SB31I6i2sIKgKWnkbJM8O0EU91Gv2UsYVvtZTl6IA0sCwk2e2MZf5S8w5hpq9QkeVvK9qwxg==}
++  '@deepseek-ai/dsh-util-values@0.2.2-rc.3':
++    resolution: {integrity: sha512-WF8DOmVfOPLhybptIS9c+OompFiZzrMjWAxtCe9tbRNadVSRopf5eUtkspNU2Bsll2KzBc+Bz5ap8/DC1t70CQ==}
++    peerDependencies:
++      '@deepseek-ai/cordis': ~4.1.0
+ 
+-  '@deepseek-ai/schemastery@3.18.2':
+-    resolution: {integrity: sha512-njDtZsznjYxok7KLLlHOPyuv2efdWVbSflAHgztSfbMsg+CVraEoRe2DjOCgClYv3ZCSm7WXoaUkbB/+RY7tWQ==}
++  '@deepseek-ai/schemastery@3.19.0':
++    resolution: {integrity: sha512-bDXoYQa7ghAhmdYD5VPlzKxEzJV/aKkz5l4V5h1u06z8GAPN1ROewSjvR9WiXhpa52E9fng8lpH5QdCRIQgnyQ==}
+ 
+   '@emnapi/core@1.10.0':
+     resolution: {integrity: sha512-yq6OkJ4p82CAfPl0u9mQebQHKPJkY7WrIuk205cTYnYe+k2Z8YBh11FrbRG/H6ihirqcacOgl2BIO8oyMQLeXw==}
+@@ -1031,9 +1007,6 @@ packages:
+     resolution: {integrity: sha512-BJ8/l4R5LRE7hW9WdSuGYrLSHi2ynxeFpDFbH0K/CgNeY/tyhk+vO6TYxXC5r5CpUhNVX310xzPsN/H9lCdfOA==}
+     engines: {node: '>=14'}
+ 
+-  argparse@2.0.1:
+-    resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
+-
+   assertion-error@2.0.1:
+     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
+     engines: {node: '>=12'}
+@@ -1151,10 +1124,6 @@ packages:
+   js-tokens@4.0.0:
+     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
+ 
+-  js-yaml@4.3.2:
+-    resolution: {integrity: sha512-SFNOvSJ+Dgf/9An904Yx+CgSlIPCkIpao4qo51lpee25TIRejdH3rhR4EZMGoNx3/TP3O+wzWuiTFl4sqbltzA==}
+-    hasBin: true
+-
+   jsdom@29.1.1:
+     resolution: {integrity: sha512-ECi4Fi2f7BdJtUKTflYRTiaMxIB0O6zfR1fX0GXpUrf6flp8QIYn1UT20YQqdSOfk2dfkCwS8LAFoJDEppNK5Q==}
+     engines: {node: ^20.19.0 || ^22.13.0 || >=24.0.0}
+@@ -1611,6 +1580,9 @@ packages:
+     engines: {node: '>= 14.6'}
+     hasBin: true
+ 
++  zod@4.6.6:
++    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
++
+ snapshots:
+ 
+   '@asamuzakjp/css-color@5.1.11':
+@@ -1683,137 +1655,120 @@ snapshots:
+ 
+   '@csstools/css-tokenizer@4.0.0': {}
+ 
+-  '@deepseek-ai/cordis-plugin-include@1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2)(@deepseek-ai/cordis@4.0.1)':
++  '@deepseek-ai/cordis@4.1.0':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/cordis-plugin-loader': 1.0.2(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/cosmokit': 1.8.3
+-      js-yaml: 4.3.2
+-    optional: true
+-
+-  '@deepseek-ai/cordis-plugin-loader@1.0.2(@deepseek-ai/cordis@4.0.1)':
+-    dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/cosmokit': 1.8.3
+-    optional: true
+-
+-  '@deepseek-ai/cordis@4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)':
+-    dependencies:
+-      '@deepseek-ai/cosmokit': 1.8.2
++      '@deepseek-ai/cosmokit': 1.9.0
+       '@standard-schema/spec': 1.1.0
+-    optionalDependencies:
+-      '@deepseek-ai/cordis-plugin-include': 1.0.6(@deepseek-ai/cordis-plugin-loader@1.0.2)(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/cordis-plugin-loader': 1.0.2(@deepseek-ai/cordis@4.0.1)
+-
+-  '@deepseek-ai/cosmokit@1.8.2': {}
+ 
+-  '@deepseek-ai/cosmokit@1.8.3': {}
++  '@deepseek-ai/cosmokit@1.9.0': {}
+ 
+-  '@deepseek-ai/dsh-agent@0.1.0-rc.6(1684446fc331419a339cbf09573762dc)':
++  '@deepseek-ai/dsh-agent@0.2.2-rc.3(5a66ed30ebfeae025fb260d2c5c96077)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/dsh-llm': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/dsh-scope': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-session': 0.1.0-rc.6(8654e07265e08162f132469eb8f876b3)
+-      '@deepseek-ai/dsh-system-prompt': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-llm@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-scope@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/dsh-typert-protocol': 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-brand': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-session-projection': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-session@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))
++      '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-typert-protocol': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-util-values': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      zod: 4.6.6
+ 
+-  '@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))':
++  '@deepseek-ai/dsh-brand@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-brand': 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
++      '@deepseek-ai/cordis': 4.1.0
+ 
+-  '@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))':
++  '@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
++      '@deepseek-ai/cordis': 4.1.0
+ 
+-  '@deepseek-ai/dsh-code-runtime@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))':
++  '@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-brand': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-error': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-timeout': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-typert-protocol': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-util-crypto': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-util-values': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/schemastery': 3.19.0
++      zod: 4.6.6
+ 
+-  '@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)':
++  '@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/schemastery': 3.18.2
++      '@deepseek-ai/cordis': 4.1.0
+ 
+-  '@deepseek-ai/dsh-llm@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))':
++  '@deepseek-ai/dsh-session-projection@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-session@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-attachment': 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-brand': 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/dsh-timeout': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/schemastery': 3.18.2
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      zod: 4.6.6
+ 
+-  '@deepseek-ai/dsh-scope@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))':
++  '@deepseek-ai/dsh-session@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-brand': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-util-values': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++    transitivePeerDependencies:
++      - '@deepseek-ai/dsh-error'
+ 
+-  '@deepseek-ai/dsh-session@0.1.0-rc.6(8654e07265e08162f132469eb8f876b3)':
++  '@deepseek-ai/dsh-system-prompt@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-brand': 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/dsh-llm': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/dsh-scope': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-typert-protocol': 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/schemastery': 3.19.0
+ 
+-  '@deepseek-ai/dsh-system-prompt@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-llm@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-scope@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))':
++  '@deepseek-ai/dsh-timeout@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/dsh-llm': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/dsh-scope': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/schemastery': 3.18.2
++      '@deepseek-ai/cordis': 4.1.0
+ 
+-  '@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))':
++  '@deepseek-ai/dsh-tools@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-agent@0.2.2-rc.3(5a66ed30ebfeae025fb260d2c5c96077))(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-session@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-system-prompt@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-user-approval@0.2.2-rc.3(106cb524db0a6912bf21e510c0c35f62))':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-agent': 0.2.2-rc.3(5a66ed30ebfeae025fb260d2c5c96077)
++      '@deepseek-ai/dsh-brand': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-user-approval': 0.2.2-rc.3(106cb524db0a6912bf21e510c0c35f62)
++      '@deepseek-ai/dsh-util-values': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/schemastery': 3.19.0
+ 
+-  '@deepseek-ai/dsh-tools@0.1.0-rc.6(0da30b280e19f63bb593aeacf97df8a0)':
++  '@deepseek-ai/dsh-typert-protocol@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-agent': 0.1.0-rc.6(1684446fc331419a339cbf09573762dc)
+-      '@deepseek-ai/dsh-code-runtime': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/dsh-llm': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/dsh-scope': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-session': 0.1.0-rc.6(8654e07265e08162f132469eb8f876b3)
+-      '@deepseek-ai/dsh-system-prompt': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-llm@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-scope@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/dsh-user-approval': 0.1.0-rc.8(eb62d5c9b8d8852c111c1d6d64e3acab)
+-      '@deepseek-ai/schemastery': 3.18.2
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-brand': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      zod: 4.6.6
+ 
+-  '@deepseek-ai/dsh-typert-protocol@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))':
++  '@deepseek-ai/dsh-user-approval@0.2.2-rc.3(106cb524db0a6912bf21e510c0c35f62)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
++      '@deepseek-ai/cordis': 4.1.0
++      '@deepseek-ai/dsh-agent': 0.2.2-rc.3(5a66ed30ebfeae025fb260d2c5c96077)
++      '@deepseek-ai/dsh-brand': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-llm': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-scope': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)
++      '@deepseek-ai/dsh-session': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/dsh-session-projection': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-session@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))
++      '@deepseek-ai/dsh-system-prompt': 0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-llm@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)(@deepseek-ai/dsh-error@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)))(@deepseek-ai/dsh-scope@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0))
++      '@deepseek-ai/schemastery': 3.19.0
++      zod: 4.6.6
+ 
+-  '@deepseek-ai/dsh-user-approval@0.1.0-rc.8(eb62d5c9b8d8852c111c1d6d64e3acab)':
++  '@deepseek-ai/dsh-util-crypto@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)':
+     dependencies:
+-      '@deepseek-ai/cordis': 4.0.1(@deepseek-ai/cordis-plugin-include@1.0.6)(@deepseek-ai/cordis-plugin-loader@1.0.2)
+-      '@deepseek-ai/dsh-agent': 0.1.0-rc.6(1684446fc331419a339cbf09573762dc)
+-      '@deepseek-ai/dsh-brand': 0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-invariants': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)
+-      '@deepseek-ai/dsh-llm': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/dsh-scope': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))
+-      '@deepseek-ai/dsh-session': 0.1.0-rc.6(8654e07265e08162f132469eb8f876b3)
+-      '@deepseek-ai/dsh-system-prompt': 0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-llm@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-attachment@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-brand@0.1.0-rc.8(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))(@deepseek-ai/dsh-timeout@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1))))(@deepseek-ai/dsh-scope@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)(@deepseek-ai/dsh-invariants@0.1.0-rc.6(@deepseek-ai/cordis@4.0.1)))
+-      '@deepseek-ai/schemastery': 3.18.2
++      '@deepseek-ai/cordis': 4.1.0
+ 
+-  '@deepseek-ai/schemastery@3.18.1':
++  '@deepseek-ai/dsh-util-values@0.2.2-rc.3(@deepseek-ai/cordis@4.1.0)':
+     dependencies:
+-      '@deepseek-ai/cosmokit': 1.8.2
+-      '@standard-schema/spec': 1.1.0
++      '@deepseek-ai/cordis': 4.1.0
+ 
+-  '@deepseek-ai/schemastery@3.18.2':
++  '@deepseek-ai/schemastery@3.19.0':
+     dependencies:
+-      '@deepseek-ai/cosmokit': 1.8.3
++      '@deepseek-ai/cosmokit': 1.9.0
+       '@standard-schema/spec': 1.1.0
+ 
+   '@emnapi/core@1.10.0':
+@@ -2286,9 +2241,6 @@ snapshots:
+ 
+   ansis@4.3.1: {}
+ 
+-  argparse@2.0.1:
+-    optional: true
+-
+   assertion-error@2.0.1: {}
+ 
+   ast-kit@3.0.0-beta.1:
+@@ -2403,11 +2355,6 @@ snapshots:
+ 
+   js-tokens@4.0.0: {}
+ 
+-  js-yaml@4.3.2:
+-    dependencies:
+-      argparse: 2.0.1
+-    optional: true
+-
+   jsdom@29.1.1:
+     dependencies:
+       '@asamuzakjp/css-color': 5.1.11
+@@ -2831,3 +2778,5 @@ snapshots:
+ 
+   yaml@2.9.0:
+     optional: true
++
++  zod@4.6.6: {}
+diff --git a/scripts/migrate-session-log.mjs b/scripts/migrate-session-log.mjs
+index 7c02501..5e257fa 100644
+--- a/scripts/migrate-session-log.mjs
++++ b/scripts/migrate-session-log.mjs
+@@ -205,8 +205,17 @@ function backupPath(file) {
+ 
+ async function validateSession(header, events) {
+   try {
+-    const { Session, SessionId } = await import('@deepseek-ai/dsh-session')
+-    Session.create(SessionId(header.id), events, header)
++    const { SESSION_FORMAT_VERSION, Session, SessionId } = await import('@deepseek-ai/dsh-session')
++    // Legacy session headers predate the 0.2.2 header contract: they carry
++    // `version: 0` and may still carry `seedLength`, while the current reader
++    // requires an explicit `isSeeded` flag. Normalize only the validation copy;
++    // the rewritten log keeps the original header fields.
++    Session.create(SessionId(header.id), events, {
++      version: SESSION_FORMAT_VERSION,
++      id: SessionId(header.id),
++      createdAt: typeof header.createdAt === 'number' ? header.createdAt : 0,
++      isSeeded: false,
++    })
+   } catch (error) {
+     throw new Error(`DSH validation failed: ${error instanceof Error ? error.message : String(error)}`)
+   }
+diff --git a/scripts/recover-writer-lock.d.mts b/scripts/recover-writer-lock.d.mts
+new file mode 100644
+index 0000000..10b4545
+--- /dev/null
++++ b/scripts/recover-writer-lock.d.mts
+@@ -0,0 +1,6 @@
++export function recoverWriterLock(directory: string, expectedPid: number): {
++  recovered: true
++  directory: string
++  pid: number
++  lockId: string
++}
+diff --git a/scripts/recover-writer-lock.mjs b/scripts/recover-writer-lock.mjs
+new file mode 100644
+index 0000000..0a112b5
+--- /dev/null
++++ b/scripts/recover-writer-lock.mjs
+@@ -0,0 +1,51 @@
++#!/usr/bin/env node
++import { randomUUID } from 'node:crypto'
++import { closeSync, lstatSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
++import { resolve, join } from 'node:path'
++import { pathToFileURL } from 'node:url'
++
++/** Explicit local recovery. PID reuse, unreadable state and unknown liveness fail closed. */
++export function recoverWriterLock(directory, expectedPid) {
++  if (!Number.isSafeInteger(expectedPid) || expectedPid <= 0) throw new TypeError('expected PID must be a positive safe integer')
++  const dir = resolve(directory)
++  const file = join(dir, 'writer.lock')
++  const guard = join(dir, 'writer-recovery.lock')
++  const guardId = JSON.stringify({ pid: process.pid, id: randomUUID() })
++  // Serialize recovery commands. A stale recovery guard requires offline inspection.
++  const guardFd = openSync(guard, 'wx', 0o600)
++  try {
++    writeFileSync(guardFd, guardId)
++    const stat = lstatSync(file)
++    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('writer lock must be a regular file')
++    const original = readFileSync(file, 'utf8')
++    const owner = JSON.parse(original)
++    if (!owner || !Number.isSafeInteger(owner.pid) || owner.pid <= 0 || typeof owner.id !== 'string' || !owner.id) {
++      throw new Error('writer lock identity is invalid; inspect offline')
++    }
++    if (owner.pid !== expectedPid) throw new Error('writer lock PID changed; refusing recovery')
++    try {
++      process.kill(owner.pid, 0)
++      throw new Error('writer process is still alive; refusing recovery')
++    } catch (error) {
++      if (!error || error.code !== 'ESRCH') throw error
++    }
++    if (readFileSync(file, 'utf8') !== original) throw new Error('writer lock identity changed; refusing recovery')
++    unlinkSync(file)
++    return { recovered: true, directory: dir, pid: owner.pid, lockId: owner.id }
++  } finally {
++    closeSync(guardFd)
++    // Never remove a replacement guard belonging to another recovery.
++    if (readFileSync(guard, 'utf8') === guardId) unlinkSync(guard)
++  }
++}
++
++if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
++  const args = process.argv.slice(2)
++  if (args.length !== 4 || args[0] !== '--dir' || args[2] !== '--expected-pid') {
++    console.error('Usage: node scripts/recover-writer-lock.mjs --dir <local-storage-directory> --expected-pid <dead-pid>')
++    process.exitCode = 2
++  } else {
++    try { console.log(JSON.stringify(recoverWriterLock(args[1], Number(args[3])))) }
++    catch (error) { console.error(error.message); process.exitCode = 1 }
++  }
++}
+diff --git a/src/client/index.tsx b/src/client/index.tsx
+index af1f736..06a420e 100644
+--- a/src/client/index.tsx
++++ b/src/client/index.tsx
+@@ -42,6 +42,8 @@ interface ScopeStatus {
+   usedTokens: number
+   remainingTokens: number
+   exhausted: boolean
++  /** True when this conversation is unlocked: the ledger ceiling is 2^53-1. */
++  unlimited: boolean
+   usage: {
+     inputTokens: number
+     cacheReadTokens: number
+@@ -74,6 +76,7 @@ const styles = `
+ .agb-badge{font-size:10px;padding:2px 8px;border-radius:10px}
+ .agb-badge.on{background:rgba(231,76,60,.15);color:#e74c3c}
+ .agb-badge.off{background:rgba(46,204,113,.15);color:#2ecc71}
++.agb-badge.free{background:rgba(74,158,255,.15);color:#4a9eff}
+ .agb-bar{height:6px;background:var(--theme-input-bg,#111);border:1px solid var(--theme-border,#333);border-radius:4px;overflow:hidden;margin:4px 0 8px}
+ .agb-bar-fill{height:100%;background:var(--theme-accent,#4a9eff)}
+ .agb-meta{color:var(--theme-text-secondary,#888);font-size:11px;margin:0 0 8px}
+@@ -109,29 +112,39 @@ function ScopeRow(props: {
+   scope: ScopeStatus
+   busy: boolean
+   onAdjust: (scopeKey: string, limitTokens: number) => void
++  onUnlock: (scopeKey: string) => void
+   onReset: (scopeKey: string) => void
+ }): React.JSX.Element {
+-  const { scope, busy, onAdjust, onReset } = props
+-  const [limit, setLimit] = useState(String(scope.limitTokens))
+-  useEffect(() => setLimit(String(scope.limitTokens)), [scope.limitTokens])
++  const { scope, busy, onAdjust, onUnlock, onReset } = props
++  const locked = !scope.unlimited
++  const [limit, setLimit] = useState(locked ? String(scope.limitTokens) : '')
++  useEffect(() => {
++    setLimit(locked ? String(scope.limitTokens) : '')
++  }, [locked, scope.limitTokens])
+   const validLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0
+-  const pct = scope.limitTokens > 0
++  const pct = locked && scope.limitTokens > 0
+     ? Math.min(100, Math.round((scope.usedTokens / scope.limitTokens) * 100))
+     : 0
++  const badge = scope.unlimited
++    ? <span className="agb-badge free">无限制</span>
++    : <span className={'agb-badge ' + (scope.exhausted ? 'on' : 'off')}>
++        {scope.exhausted ? '已耗尽' : '已上锁'}
++      </span>
+   return (
+     <li className="agb-item">
+       <div className="agb-item-head">
+         <span className="agb-scope" title={scope.scopeKey}>{scope.scopeKey}</span>
+-        <span className={'agb-badge ' + (scope.exhausted ? 'on' : 'off')}>
+-          {scope.exhausted ? '已耗尽' : '正常'}
+-        </span>
+-      </div>
+-      <div className="agb-bar">
+-        <div className="agb-bar-fill" style={{ width: `${pct}%` }} />
++        {badge}
+       </div>
++      {locked && (
++        <div className="agb-bar">
++          <div className="agb-bar-fill" style={{ width: `${pct}%` }} />
++        </div>
++      )}
+       <p className="agb-meta">
+-        used {scope.usedTokens} / limit {scope.limitTokens} · remaining {scope.remainingTokens}
+-        {' '}· unmetered {scope.unmeteredCalls}
++        {locked
++          ? <>used {scope.usedTokens} / limit {scope.limitTokens} · remaining {scope.remainingTokens}{' '}· unmetered {scope.unmeteredCalls}</>
++          : <>used {scope.usedTokens} · 不设上限 · unmetered {scope.unmeteredCalls}</>}
+       </p>
+       <div className="agb-row">
+         <input
+@@ -140,6 +153,7 @@ function ScopeRow(props: {
+           min="1"
+           max={Number.MAX_SAFE_INTEGER}
+           step="1"
++          placeholder="Token 上限"
+           aria-label="Token 预算上限"
+           value={limit}
+           disabled={busy}
+@@ -150,7 +164,14 @@ function ScopeRow(props: {
+           disabled={busy || !validLimit}
+           onClick={() => onAdjust(scope.scopeKey, Number(limit))}
+         >
+-          调整上限
++          {locked ? '调整上限' : '锁定此对话'}
++        </button>
++        <button
++          className="agb-btn ghost"
++          disabled={busy || scope.unlimited}
++          onClick={() => onUnlock(scope.scopeKey)}
++        >
++          解除限制
+         </button>
+         <button
+           className="agb-btn danger"
+@@ -241,6 +262,16 @@ function AgentBudgetSection(): React.JSX.Element {
+     )
+   }
+ 
++  const onUnlock = (scopeKey: string): void => {
++    void runAction(
++      () => fetchJson<ActionResponse>('/adjust-limit', {
++        method: 'POST',
++        body: JSON.stringify({ scopeKey, unlimited: true }),
++      }),
++      '已解除限制',
++    )
++  }
++
+   const onReset = (scopeKey: string): void => {
+     if (!window.confirm(`确认重置 ${scopeKey} 的用量？`)) return
+     void runAction(
+@@ -257,7 +288,7 @@ function AgentBudgetSection(): React.JSX.Element {
+     <div className="agb-page">
+       <style>{styles}</style>
+       <h3>Agent Token 预算（dsh-plugin-agent-budget）</h3>
+-      <p className="agb-stats">共 {scopes.length} 个预算作用域</p>
++      <p className="agb-stats">共 {scopes.length} 个预算作用域 · 默认不限制，只有被「锁定」的对话才会在超限时拦截</p>
+       {statusText !== undefined && (
+         <div className="agb-msg" role="status" style={{ display: 'block', borderColor: error !== undefined || loadError !== undefined ? '#d33' : 'var(--theme-border,#333)' }}>
+           {statusText}
+@@ -272,6 +303,7 @@ function AgentBudgetSection(): React.JSX.Element {
+               scope={scope}
+               busy={busy}
+               onAdjust={onAdjust}
++              onUnlock={onUnlock}
+               onReset={onReset}
+             />
+           ))}
+diff --git a/src/index.ts b/src/index.ts
+index d3e52b5..af381fe 100644
+--- a/src/index.ts
++++ b/src/index.ts
+@@ -1,7 +1,8 @@
+ /** Shared, replayable token budgets for one DSH agent tree. */
+ 
+ import { randomUUID } from 'node:crypto'
+-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
++import { AsyncLocalStorage } from 'node:async_hooks'
++import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
+ import type { IncomingMessage, ServerResponse } from 'node:http'
+ import { homedir } from 'node:os'
+ import { join } from 'node:path'
+@@ -13,6 +14,13 @@ import { KNOWN_SESSION_EVENT_TYPES, SessionId } from '@deepseek-ai/dsh-session'
+ import { defineTool } from '@deepseek-ai/dsh-tools'
+ import { authorizeRequest, HttpError, readJsonBody, sendJson } from './http.ts'
+ import { acquireStorageLock, writeAtomic } from '../scripts/storage.mjs'
++import { assertReservationRequest, foldReservationEvent, isReservationEvent, pendingReservation, sameReservationRequest, snapshotOf, tokenCount } from './reservations.ts'
++import type { AgentBudgetService, BudgetEventReceipt, Reservation, ReservationDecision, ReservationEvent, ReservationFields, ReservationRequest, UsageBuckets as ReservedUsage } from './reservations.ts'
++export type { AgentBudgetService, BudgetSnapshot, Reservation, ReservationRequest, ReservationDecision, BudgetEventReceipt } from './reservations.ts'
++
++declare module '@deepseek-ai/cordis' {
++  interface Context { agentBudget: AgentBudgetService }
++}
+ 
+ interface BudgetWebServer {
+   register(route: {
+@@ -26,18 +34,6 @@ function isWebServer(value: unknown): value is BudgetWebServer {
+   return isRecord(value) && typeof value.register === 'function'
+ }
+ 
+-interface BudgetSystemPrompt {
+-  context(entry: {
+-    name: string
+-    order: number
+-    text: string | ((assembleCtx: { agent?: { session: { id: unknown } } }) => string)
+-  }): () => void
+-}
+-
+-function isSystemPrompt(value: unknown): value is BudgetSystemPrompt {
+-  return isRecord(value) && typeof value.context === 'function'
+-}
+-
+ export const name = 'agent-budget'
+ export const inject = ['llm', 'sessions', 'tools', 'agents']
+ 
+@@ -45,9 +41,19 @@ const EVENT_VERSION = 1 as const
+ const EXHAUSTED_CODE = 'TOKEN_BUDGET_EXHAUSTED'
+ const CONCURRENT_LIMIT_CODE = 'TOKEN_BUDGET_CONCURRENT_LIMIT'
+ const EVENT_TYPES = ['budget/open', 'budget/sample', 'budget/unmetered'] as const
+-const PRESSURE_WARN_RATIO = 0.5
+-const PRESSURE_CRITICAL_RATIO = 0.8
+-const PRESSURE_CONTEXT_ORDER = 900
++/**
++ * Ceiling written for a scope the user has not locked. Every consumer already
++ * treats the limit as a safe integer, so the maximum safe integer is the
++ * "no limit" sentinel: reservations can never exhaust it, and the ledger stays
++ * replayable with the same schema.
++ */
++const UNLIMITED_TOKENS = Number.MAX_SAFE_INTEGER
++/**
++ * Output tokens a reservation assumes when the caller leaves `maxTokens`
++ * unset. The call itself is not capped by this number; it only keeps the
++ * up-front reservation finite so a locked scope can still admit the call.
++ */
++const RESERVATION_OUTPUT_ALLOWANCE = 8192
+ 
+ type MissingUsagePolicy = 'exhaust' | 'ignore'
+ type ScopeMode = 'session' | 'tree'
+@@ -78,7 +84,7 @@ interface BudgetSample {
+   sessionId: string
+   provider: string
+   model: string
+-  purpose: 'conversation' | 'compaction' | 'session-title'
++  purpose: 'conversation' | 'compaction' | 'session-title' | 'timeline-report' | 'auto-review'
+   usage: UsageBuckets
+ }
+ 
+@@ -90,7 +96,7 @@ interface BudgetUnmetered {
+   sessionId: string
+   provider: string
+   model: string
+-  purpose: 'conversation' | 'compaction' | 'session-title'
++  purpose: 'conversation' | 'compaction' | 'session-title' | 'timeline-report' | 'auto-review'
+ }
+ 
+ declare module '@deepseek-ai/dsh-session' {
+@@ -103,7 +109,12 @@ declare module '@deepseek-ai/dsh-session' {
+ 
+ /** Plugin configuration. The limit is fixed in a budget scope's first open event. */
+ export interface Config {
+-  maxTokens: number
++  /**
++   * Token ceiling for scopes opened by this plugin. Omit it (or leave the
++   * bundle patch without it) to start every conversation unlocked; the
++   * settings page can then lock individual conversations.
++   */
++  maxTokens?: number
+   missingUsage?: MissingUsagePolicy
+   scope?: ScopeMode
+   storageDir?: string
+@@ -115,13 +126,21 @@ export interface Config {
+   maxOutputTokens?: number
+   /** Maximum simultaneous provider calls admitted per budget scope. */
+   maxConcurrentCalls?: number
++  /**
++   * Hard output cap the reservation protocol writes into calls that do not set
++   * their own `maxTokens`. Omit it to leave the caller's limit untouched (the
++   * default: only the reservation estimate assumes a bounded output).
++   */
++  requestMaxTokens?: number
+   /** Inject budget-pressure context into system prompts. Defaults to true. */
+   pressurePrompt?: boolean
++  /** Opt-in atomic estimation/reservation protocol; requires a bounded request output. */
++  reservationMode?: boolean
+ }
+ 
+ /** Loader-facing schema; runtime validation also protects direct plugin calls. */
+ export const Config: z<Config> = z.object({
+-  maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).required(),
++  maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
+   missingUsage: z.union(['exhaust', 'ignore'] as const).default('exhaust'),
+   scope: z.union(['session', 'tree'] as const).default('tree'),
+   storageDir: z.string(),
+@@ -129,11 +148,13 @@ export const Config: z<Config> = z.object({
+   degradeModel: z.string(),
+   maxOutputTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
+   maxConcurrentCalls: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
++  requestMaxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER),
+   pressurePrompt: z.boolean().default(true),
++  reservationMode: z.boolean().default(false),
+ })
+ 
+ /** One append-only ledger line in the plugin-owned sidecar store. */
+-type LedgerLine =
++type LegacyLedgerLine =
+   | {
+     type: 'start' | 'end'
+     version: typeof EVENT_VERSION
+@@ -180,7 +201,9 @@ type LedgerLine =
+     scopeKey: string
+   }
+ 
+-interface LedgerState {
++type LedgerLine = LegacyLedgerLine | ReservationEvent
++
++interface LedgerState extends ReservationFields {
+   open: LedgerOpen | undefined
+   samples: Map<string, UsageBuckets>
+   unmetered: Set<string>
+@@ -247,6 +270,7 @@ interface ControlConfig {
+   degradeModel: string | undefined
+   maxOutputTokens: number | undefined
+   maxConcurrentCalls: number | undefined
++  requestMaxTokens: number | undefined
+   pressurePrompt: boolean
+ }
+ 
+@@ -265,14 +289,17 @@ function validateConfig(config: Config): {
+     'degradeModel',
+     'maxOutputTokens',
+     'maxConcurrentCalls',
++    'requestMaxTokens',
+     'pressurePrompt',
++    'reservationMode',
+   ])
+   for (const key of Object.keys(config)) {
+     if (!knownKeys.has(key)) {
+       throw new TypeError(`agent-budget: unknown config key ${JSON.stringify(key)}`)
+     }
+   }
+-  if (!Number.isSafeInteger(config.maxTokens) || config.maxTokens < 1) {
++  if (config.maxTokens !== undefined
++    && (!Number.isSafeInteger(config.maxTokens) || config.maxTokens < 1)) {
+     throw new TypeError('agent-budget: maxTokens must be a positive safe integer')
+   }
+   const missingUsage = config.missingUsage ?? 'exhaust'
+@@ -305,15 +332,20 @@ function validateConfig(config: Config): {
+   if (maxConcurrentCalls !== undefined && (!Number.isSafeInteger(maxConcurrentCalls) || maxConcurrentCalls < 1)) {
+     throw new TypeError('agent-budget: maxConcurrentCalls must be a positive safe integer')
+   }
++  const requestMaxTokens = config.requestMaxTokens
++  if (requestMaxTokens !== undefined && (!Number.isSafeInteger(requestMaxTokens) || requestMaxTokens < 1)) {
++    throw new TypeError('agent-budget: requestMaxTokens must be a positive safe integer')
++  }
+   const pressurePrompt = config.pressurePrompt ?? true
+   if (typeof pressurePrompt !== 'boolean') {
+     throw new TypeError('agent-budget: pressurePrompt must be a boolean')
+   }
++  if (config.reservationMode !== undefined && typeof config.reservationMode !== 'boolean') throw new TypeError('agent-budget: reservationMode must be boolean')
+   return {
+     missingUsage,
+     scope,
+     storageDir,
+-    control: { degradeRatio, degradeModel, maxOutputTokens, maxConcurrentCalls, pressurePrompt },
++    control: { degradeRatio, degradeModel, maxOutputTokens, maxConcurrentCalls, requestMaxTokens, pressurePrompt },
+   }
+ }
+ 
+@@ -324,6 +356,8 @@ function emptyState(): LedgerState {
+     unmetered: new Set(),
+     pending: new Set(),
+     usage: { ...ZERO_USAGE },
++    reservations: new Map(),
++    finalizeLimit: 0,
+   }
+ }
+ 
+@@ -398,12 +432,15 @@ function assertSubjectFields(fields: {
+   }
+   if (fields.purpose !== 'conversation'
+     && fields.purpose !== 'compaction'
+-    && fields.purpose !== 'session-title') {
+-    throw new Error('agent-budget: purpose must be "conversation", "compaction", or "session-title"')
++    && fields.purpose !== 'session-title'
++    && fields.purpose !== 'timeline-report'
++    && fields.purpose !== 'auto-review') {
++    throw new Error('agent-budget: purpose must be "conversation", "compaction", "session-title", "timeline-report", or "auto-review"')
+   }
+ }
+ 
+ function isLedgerLine(value: unknown): value is LedgerLine {
++  if (isReservationEvent(value)) return true
+   if (!isRecord(value) || typeof value.version !== 'number' || value.version !== EVENT_VERSION) {
+     return false
+   }
+@@ -444,6 +481,10 @@ function isLedgerLine(value: unknown): value is LedgerLine {
+ 
+ function foldLedgerLine(scopeKey: string, state: LedgerState, line: LedgerLine): void {
+   if (line.scopeKey !== scopeKey) throw new Error('agent-budget: mismatched scope')
++  if (line.version === 2) {
++    foldReservationEvent(state, line)
++    return
++  }
+   if (line.type === 'open') {
+     if (state.open === undefined) {
+       state.open = {
+@@ -466,6 +507,9 @@ function foldLedgerLine(scopeKey: string, state: LedgerState, line: LedgerLine):
+     return
+   }
+   if (line.type === 'sample') {
++    if ([...state.reservations.values()].some(r => r.modelCallId === line.callId)) {
++      throw new Error('agent-budget: legacy sample conflicts with reserved call')
++    }
+     const next = { ...state.usage }
+     const previous = state.samples.get(line.callId)
+     if (previous !== undefined) add(next, previous, -1)
+@@ -481,13 +525,16 @@ function foldLedgerLine(scopeKey: string, state: LedgerState, line: LedgerLine):
+   }
+   if (line.type === 'adjust') {
+     ledgerOpen.limitTokens = line.limitTokens
++    state.finalizeLimit = Math.min(state.finalizeLimit, line.limitTokens)
+     return
+   }
+   if (line.type === 'reset') {
++    if ([...state.reservations.values()].some(pendingReservation)) throw new Error('agent-budget: cannot reset unresolved reservations')
+     state.samples.clear()
+     state.unmetered.clear()
+     state.pending.clear()
+     state.usage = { ...ZERO_USAGE }
++    state.reservations.clear()
+   }
+ }
+ 
+@@ -510,6 +557,9 @@ class LedgerStore {
+   private readonly indexPath: string
+   readonly states = new Map<string, LedgerState>()
+   private readonly scopeIndex = new Map<string, string>()
++  readonly receipts: BudgetEventReceipt[] = []
++  private readonly eventIds = new Map<string, string>()
++  private v2Ready = false
+ 
+   constructor(readonly dir: string) {
+     this.ledgerPath = join(dir, 'ledger.jsonl')
+@@ -519,13 +569,31 @@ class LedgerStore {
+   append(line: LedgerLine): void {
+     if (this.failed) throw new Error('agent-budget: storage failed; repair and restart before continuing')
+     try {
++      if (line.version === 2 && !this.v2Ready) {
++        const backup = join(this.dir, 'ledger.v1-backup.jsonl')
++        if (existsSync(this.ledgerPath) && !existsSync(backup)) copyFileSync(this.ledgerPath, backup)
++        this.v2Ready = true
++      }
+       appendLedgerLine(this.ledgerPath, line)
++      this.recordReceipt(line)
+     } catch (error) {
+       this.failed = true
+       throw error
+     }
+   }
+ 
++  private recordReceipt(line: LedgerLine): void {
++    const cursor = this.receipts.length + 1
++    const eventId = line.version === 2 ? line.eventId : `legacy:${cursor}`
++    if (line.version === 2) {
++      const previous = this.eventIds.get(eventId)
++      const encoded = JSON.stringify(line)
++      if (previous !== undefined && previous !== encoded) throw new Error('agent-budget: conflicting event ID')
++      this.eventIds.set(eventId, encoded)
++    }
++    this.receipts.push({ cursor, eventId, scopeKey: line.scopeKey, type: line.type, payload: structuredClone(line) })
++  }
++
+   load(): void {
+     ensureDir(this.dir)
+     if (existsSync(this.indexPath)) {
+@@ -551,12 +619,16 @@ class LedgerStore {
+           throw new Error(`agent-budget: malformed ledger JSON at line ${index + 1}; restore or repair the ledger before restarting`)
+         }
+         if (!isLedgerLine(parsed)) throw new Error(`agent-budget: invalid ledger record at line ${index + 1}`)
++        if (parsed.version === 2) this.v2Ready = true
+         let state = this.states.get(parsed.scopeKey)
+         if (state === undefined) {
+           state = emptyState()
+           this.states.set(parsed.scopeKey, state)
+         }
+-        foldLedgerLine(parsed.scopeKey, state, parsed)
++        const existingEvent = parsed.version === 2 ? this.eventIds.get(parsed.eventId) : undefined
++        if (existingEvent !== undefined && existingEvent !== JSON.stringify(parsed)) throw new Error('agent-budget: conflicting event ID')
++        if (existingEvent === undefined) foldLedgerLine(parsed.scopeKey, state, parsed)
++        this.recordReceipt(parsed)
+       }
+       // Preserve a complete record whose terminating newline was lost.
+       if (lines.at(-1) !== '') appendFileSync(this.ledgerPath, '\n', 'utf8')
+@@ -632,6 +704,7 @@ class LedgerStore {
+   }
+ 
+   appendReset(scopeKey: string): void {
++    if ([...this.state(scopeKey).reservations.values()].some(pendingReservation)) throw new Error('agent-budget: cannot reset unresolved reservations')
+     const line: LedgerLine = {
+       type: 'reset',
+       version: EVENT_VERSION,
+@@ -646,6 +719,15 @@ class LedgerStore {
+     this.append(line)
+     foldLedgerLine(scopeKey, this.state(scopeKey), line)
+   }
++
++  appendReservation(line: ReservationEvent): void {
++    if (!isReservationEvent(line)) throw new Error('agent-budget: invalid reservation event')
++    const current = this.state(line.scopeKey)
++    // Validate complete transition against a copy before any durable write.
++    foldLedgerLine(line.scopeKey, structuredClone(current), line)
++    this.append(line)
++    foldLedgerLine(line.scopeKey, current, line)
++  }
+ }
+ 
+ function denial(error: HarnessError): AsyncIterable<StreamChunk> {
+@@ -663,15 +745,15 @@ function runtimeRoot(ctx: Context, sessionId: string, cache: OwnershipCache): st
+   let ownerByChild = cache.ownerByChild
+   if (ownerByChild === undefined || cache.builtGeneration !== cache.generation) {
+     ownerByChild = new Map<string, string>()
++    // 0.2.2 removed AgentRegistry.isOwnedBy; durable header lineage carries the
++    // same parent relation, and we only keep parents that are still live.
++    const liveIds = new Set(live.map(candidate => String(candidate.session.id)))
+     for (const child of live) {
+       const childId = String(child.session.id)
+-      for (const candidate of live) {
+-        if (String(candidate.session.id) === childId) continue
+-        if (agents.isOwnedBy(child.session.id, candidate)) {
+-          ownerByChild.set(childId, String(candidate.session.id))
+-          break
+-        }
+-      }
++      const parentSession = child.session.header.parentSession
++      if (parentSession === undefined) continue
++      const parentId = String(parentSession)
++      if (parentId !== childId && liveIds.has(parentId)) ownerByChild.set(childId, parentId)
+     }
+     cache.ownerByChild = ownerByChild
+     cache.builtGeneration = cache.generation
+@@ -756,7 +838,7 @@ function openLedger(
+       version: EVENT_VERSION,
+       scopeKey,
+       epochId: randomUUID(),
+-      limitTokens: config.maxTokens,
++      limitTokens: config.maxTokens ?? UNLIMITED_TOKENS,
+     }
+     store.appendOpen(scopeKey, payload.epochId, payload.limitTokens)
+     logger.info(
+@@ -779,18 +861,30 @@ function budgetStatus(
+   missingUsage: MissingUsagePolicy,
+ ): BudgetStatus {
+   const state = create ? openLedger(store, config, logger, scopeKey).state : store.state(scopeKey)
+-  const limitTokens = state.open?.limitTokens ?? config.maxTokens
++  const limitTokens = state.open?.limitTokens ?? config.maxTokens ?? UNLIMITED_TOKENS
+   const usedTokens = total(state.usage)
+   const unresolved = new Set(state.unmetered)
+   for (const callId of state.pending) {
+     if (!store.activeCallIds.has(callId)) unresolved.add(callId)
+   }
++  let reservedTokens = 0
++  let finalizeUsed = 0
++  let finalizeReserved = 0
++  for (const reservation of state.reservations.values()) {
++    if (pendingReservation(reservation)) reservedTokens += reservation.estimatedTokens
++    if (reservation.purpose === 'finalize' && pendingReservation(reservation)) finalizeReserved += reservation.estimatedTokens
++    if (reservation.purpose === 'finalize' && reservation.usage) finalizeUsed += total(reservation.usage)
++    if (reservation.status === 'unknown'
++      || (reservation.status === 'dispatched' && !store.activeCallIds.has(reservation.modelCallId))) unresolved.add(reservation.modelCallId)
++  }
+   const unmeteredCalls = unresolved.size
++  const available = Math.max(0, Math.min(limitTokens - usedTokens - reservedTokens,
++    limitTokens - state.finalizeLimit - usedTokens + finalizeUsed - reservedTokens + finalizeReserved))
+   return {
+     limitTokens,
+     usedTokens,
+-    remainingTokens: Math.max(0, limitTokens - usedTokens),
+-    exhausted: store.failed || usedTokens >= limitTokens || (missingUsage === 'exhaust' && unmeteredCalls > 0),
++    remainingTokens: available,
++    exhausted: store.failed || available === 0 || (unmeteredCalls > 0 && (missingUsage === 'exhaust' || state.reservations.size > 0)),
+     usage: { ...state.usage },
+     meteringComplete: unmeteredCalls === 0,
+     unmeteredCalls,
+@@ -815,25 +909,157 @@ function degradeConfig(cfg: LlmCallConfig, status: BudgetStatus, control: Contro
+ }
+ 
+ /** Budget-pressure prompt text for one scope; empty below the warn threshold. */
+-function pressureText(status: BudgetStatus): string {
+-  if (status.limitTokens < 1) return ''
+-  const usedRatio = status.usedTokens / status.limitTokens
+-  if (status.exhausted || usedRatio >= PRESSURE_CRITICAL_RATIO) {
+-    return `Token budget critical: ${status.usedTokens}/${status.limitTokens} tokens used. `
+-      + 'Answer directly with what you have; do not spawn subagents; '
+-      + 'avoid non-essential tool calls and lengthy explanations.'
+-  }
+-  if (usedRatio >= PRESSURE_WARN_RATIO) {
+-    return `Token budget notice: ${status.usedTokens}/${status.limitTokens} tokens used. `
+-      + 'Prefer concise answers and avoid unnecessary subagents or tool calls.'
+-  }
+-  return ''
+-}
+ 
+ function scopesOf(store: LedgerStore): string[] {
+   return [...store.states.keys()].filter(scopeKey => store.state(scopeKey).open !== undefined)
+ }
+ 
++function reservationService(
++  store: LedgerStore,
++  scopeForSession: AgentBudgetService['scopeForSession'],
++  maxConcurrentCalls: number | undefined,
++  isDisposed: () => boolean,
++  onIdle: () => void,
++): AgentBudgetService {
++  const ensureRunning = (): void => {
++    if (isDisposed()) throw new Error('agent-budget: plugin is disposed')
++    if (store.failed) throw new Error('agent-budget: storage failed; repair and restart')
++  }
++  const snapshot = (scopeKey: string) => snapshotOf(scopeKey, store.state(scopeKey), store.receipts.length, store.failed, store.activeCallIds)
++  const find = (reservationId: string): Reservation => {
++    for (const state of store.states.values()) {
++      const found = state.reservations.get(reservationId)
++      if (found) return found
++    }
++    throw new Error('agent-budget: unknown reservation')
++  }
++  const event = (reservationId: string) => ({ version: 2 as const, scopeKey: find(reservationId).scopeKey, reservationId, eventId: randomUUID() })
++  const settle = (reservationId: string, usage: ReservedUsage): void => {
++    const reservation = find(reservationId)
++    if (!store.activeCallIds.has(reservation.modelCallId)) ensureRunning()
++    if (store.failed) throw new Error('agent-budget: storage failed; repair and restart')
++    const next: ReservationEvent = { ...event(reservationId), type: 'settle', usage: { ...usage } }
++    // Validate duplicates as well, without writing a redundant event.
++    foldReservationEvent(structuredClone(store.state(reservation.scopeKey)), next)
++    if (reservation.status === 'settled') return
++    store.appendReservation(next)
++    store.activeCallIds.delete(reservation.modelCallId)
++    onIdle()
++  }
++  return {
++    withPurpose: (_sessionId, _purpose, callback) => callback(),
++    withCallIdentity: (_sessionId, _modelCallId, callback) => callback(),
++    scopeForSession,
++    snapshot,
++    reserve(request: ReservationRequest): ReservationDecision {
++      ensureRunning()
++      assertReservationRequest(request)
++      if (scopeForSession(request.sessionId, { create: true }) !== request.scopeKey) throw new Error('agent-budget: reservation scope mismatch')
++      for (const state of store.states.values()) {
++        for (const existing of state.reservations.values()) {
++          if (existing.modelCallId !== request.modelCallId) continue
++          if (!sameReservationRequest(existing, request)) throw new Error('agent-budget: conflicting duplicate modelCallId')
++          return { allowed: true, reservation: structuredClone(existing), replayed: true }
++        }
++      }
++      const before = snapshot(request.scopeKey)
++      if (!before.meteringComplete) return { allowed: false, reason: 'USAGE_UNKNOWN', snapshot: before }
++      const state = store.state(request.scopeKey)
++      const pending = [...state.reservations.values()].filter(pendingReservation).length + state.pending.size
++      if (maxConcurrentCalls !== undefined && pending >= maxConcurrentCalls) return { allowed: false, reason: 'CONCURRENT_LIMIT', snapshot: before }
++      if (request.estimatedTokens > before.availableTokens || request.estimatedTokens > before[request.purpose].availableTokens) {
++        return { allowed: false, reason: 'BUDGET_UNAVAILABLE', snapshot: before }
++      }
++      const reservationId = randomUUID()
++      store.appendReservation({ version: 2, type: 'reserve', scopeKey: request.scopeKey, eventId: randomUUID(), request: { ...request }, reservationId })
++      return { allowed: true, reservation: structuredClone(find(reservationId)), replayed: false }
++    },
++    markDispatched(reservationId: string): void {
++      ensureRunning()
++      const reservation = find(reservationId)
++      const next: ReservationEvent = { ...event(reservationId), type: 'dispatch' }
++      foldReservationEvent(structuredClone(store.state(reservation.scopeKey)), next)
++      if (reservation.status === 'dispatched') return
++      store.appendReservation(next)
++      store.activeCallIds.add(reservation.modelCallId)
++    },
++    settle,
++    releaseUnsent(reservationId: string, reason: string): void {
++      ensureRunning()
++      const reservation = find(reservationId)
++      const next: ReservationEvent = { ...event(reservationId), type: 'release-unsent', reason }
++      if (!isReservationEvent(next)) throw new TypeError('agent-budget: release reason required')
++      foldReservationEvent(structuredClone(store.state(reservation.scopeKey)), next)
++      if (reservation.status === 'released_unsent') return
++      store.appendReservation(next)
++    },
++    markUnknown(reservationId: string, reason: string): void {
++      const reservation = find(reservationId)
++      if (!store.activeCallIds.has(reservation.modelCallId)) ensureRunning()
++      if (store.failed) throw new Error('agent-budget: storage failed; repair and restart')
++      const next: ReservationEvent = { ...event(reservationId), type: 'unknown', reason }
++      if (!isReservationEvent(next)) throw new TypeError('agent-budget: unknown reason required')
++      foldReservationEvent(structuredClone(store.state(reservation.scopeKey)), next)
++      if (reservation.status !== 'unknown') store.appendReservation(next)
++      store.activeCallIds.delete(reservation.modelCallId)
++      onIdle()
++    },
++    allocate(scopeKey: string, finalizeTokens: number, reason: string): void {
++      ensureRunning()
++      tokenCount(finalizeTokens, 'finalizeTokens')
++      store.appendReservation({ version: 2, type: 'allocate', eventId: randomUUID(), scopeKey, finalizeTokens, reason })
++    },
++    eventsAfter(cursor: number): BudgetEventReceipt[] {
++      tokenCount(cursor, 'cursor')
++      if (cursor > store.receipts.length) throw new Error('agent-budget: cursor is ahead of ledger')
++      return structuredClone(store.receipts.slice(cursor))
++    },
++  }
++}
++
++function reservedStream(
++  service: AgentBudgetService,
++  options: GenerateOptions,
++  next: () => AsyncIterable<StreamChunk>,
++  purpose: 'work' | 'finalize',
++  outputAllowance: number,
++  trustedModelCallId?: string,
++): AsyncIterable<StreamChunk> {
++  if (options.sessionId === undefined) return denial(new HarnessError('reservation mode requires a sessionId', 'TOKEN_BUDGET_SESSION_REQUIRED'))
++  // The actual call keeps whatever output bound the caller chose; only the
++  // estimate needs a finite allowance, because an unbounded reservation could
++  // never be admitted against a locked scope.
++  const declared = options.maxTokens
++  const allowance = declared === undefined || !Number.isSafeInteger(declared) || declared < 1
++    ? outputAllowance
++    : Math.min(declared, outputAllowance)
++  // Conservative estimate, not a tokenizer or billing guarantee. Includes tool schemas and a 25% safety margin.
++  const baseline = Math.ceil(Buffer.byteLength(JSON.stringify({ messages: options.messages, system: options.system, tools: options.tools }), 'utf8') / 3) + 256 + allowance
++  const estimatedTokens = Math.ceil(baseline * 1.25)
++  tokenCount(estimatedTokens, 'estimatedTokens')
++  const sessionId = String(options.sessionId)
++  const request: ReservationRequest = { scopeKey: service.scopeForSession(sessionId), modelCallId: trustedModelCallId ?? randomUUID(), sessionId, provider: options.provider, model: options.model, purpose, estimatedTokens }
++  return (async function* (): AsyncGenerator<StreamChunk> {
++    const decision = service.reserve(request)
++    if (!decision.allowed) throw new HarnessError(`reservation denied: ${decision.reason}`, `TOKEN_BUDGET_${decision.reason}`)
++    const id = decision.reservation.reservationId
++    service.markDispatched(id)
++    let finalUsage: ReservedUsage | undefined
++    let completed = false
++    try {
++      for await (const chunk of next()) {
++        if (chunk.type === 'usage') finalUsage = bucketsOf(chunk.usage)
++        if (chunk.type === 'finish') completed = true
++        yield chunk
++      }
++      completed = true
++    } finally {
++      if (completed && finalUsage) service.settle(id, finalUsage)
++      else service.markUnknown(id, completed ? 'provider-returned-no-usage' : 'stream-interrupted-before-final-usage')
++    }
++  })()
++}
++
+ /** Register the shared budget gate, sidecar ledger, and read-only status tool. */
+ export function apply(ctx: Context, config: Config): void {
+   const { missingUsage, scope, storageDir, control } = validateConfig(config)
+@@ -869,17 +1095,54 @@ export function apply(ctx: Context, config: Config): void {
+ 
+   ctx.on('agent/created', () => {
+     ownershipCache.generation += 1
++    return undefined
+   })
+   ctx.on('agent/disposed', () => {
+     ownershipCache.generation += 1
++    return undefined
+   })
+ 
+   const createStatus = (scopeKey: string, create: boolean): BudgetStatus => {
+     return budgetStatus(store, config, scopeKey, create, logger, missingUsage)
+   }
+ 
++  const service = reservationService(store, (sessionId, options) => {
++    if (disposed) throw new Error('agent-budget: plugin is disposed')
++    if (!nonEmptyString(sessionId)) throw new TypeError('agent-budget: sessionId required')
++    const scopeKey = resolveScopeKey(ctx, store, sessionId, scope, logger, ownershipCache)
++    if (options?.create !== false) openLedger(store, config, logger, scopeKey)
++    return scopeKey
++  }, control.maxConcurrentCalls, () => disposed, () => {
++    if (disposed && store.activeCallIds.size === 0) releaseWriter?.()
++  })
++  const purposeContext = new AsyncLocalStorage<{ sessionId: string; purpose: 'work' | 'finalize'; modelCallId?: string }>()
++  service.withPurpose = (sessionId, purpose, callback) => {
++    if (!nonEmptyString(sessionId) || (purpose !== 'work' && purpose !== 'finalize')) throw new TypeError('agent-budget: invalid trusted purpose context')
++    const current = purposeContext.getStore()
++    return purposeContext.run({ sessionId, purpose, ...(current?.sessionId === sessionId && current.modelCallId ? { modelCallId: current.modelCallId } : {}) }, callback)
++  }
++  service.withCallIdentity = (sessionId, modelCallId, callback) => {
++    if (!nonEmptyString(sessionId) || !nonEmptyString(modelCallId)) throw new TypeError('agent-budget: invalid trusted model call identity')
++    const current = purposeContext.getStore()
++    return purposeContext.run({ sessionId, purpose: current?.sessionId === sessionId ? current.purpose : 'work', modelCallId }, callback)
++  }
++  // Dispatched records recovered after a process restart remain charged until
++  // actual usage can be reconciled. They never silently become unused credit.
++  for (const state of store.states.values()) {
++    for (const reservation of state.reservations.values()) {
++      if (reservation.status === 'dispatched') service.markUnknown(reservation.reservationId, 'recovered-dispatch-without-settlement')
++    }
++  }
++  ctx.provide('agentBudget', service)
++
+   ctx.on('llm/stream', (options, next) => {
+     if (disposed) throw new Error('agent-budget: plugin is disposed')
++    if (config.reservationMode) {
++      const trusted = purposeContext.getStore()
++      const purpose = trusted?.sessionId === String(options.sessionId) ? trusted.purpose : 'work'
++      const modelCallId = trusted?.sessionId === String(options.sessionId) ? trusted.modelCallId : undefined
++      return reservedStream(service, options, next, purpose, control.requestMaxTokens ?? RESERVATION_OUTPUT_ALLOWANCE, modelCallId)
++    }
+     if (options.sessionId === undefined) return next()
+     const sessionId = String(options.sessionId)
+     const purpose = purposeOf(options)
+@@ -1021,13 +1284,24 @@ export function apply(ctx: Context, config: Config): void {
+   // Degrade near-exhaustion requests through the agent/request waterfall: the
+   // llm/stream hook receives a deep-frozen request and can only observe or
+   // reject, so maxTokens/model tightening must happen here instead.
+-  if (control.degradeRatio !== undefined) {
++  if (control.degradeRatio !== undefined || config.reservationMode) {
+     ctx.on('agent/request', async (payload, next) => {
+       const cfg = await next()
+       if (disposed) return cfg
+       const sessionId = String(payload.agent.session.id)
+       const scopeKey = resolveScopeKey(ctx, store, sessionId, scope, logger, ownershipCache)
+-      const degraded = degradeConfig(cfg, createStatus(scopeKey, false), control)
++      const status = createStatus(scopeKey, false)
++      const trusted = purposeContext.getStore()
++      const finalizing = config.reservationMode && trusted?.sessionId === sessionId && trusted.purpose === 'finalize'
++      if (finalizing && store.state(scopeKey).open) {
++        const snapshot = service.snapshot(scopeKey)
++        status.remainingTokens = Math.min(snapshot.availableTokens, snapshot.finalize.availableTokens)
++        status.exhausted = !snapshot.meteringComplete || status.remainingTokens === 0
++      }
++      let degraded = degradeConfig(cfg, status, control)
++      if (config.reservationMode && degraded.maxTokens === undefined && control.requestMaxTokens !== undefined) {
++        degraded = { ...degraded, maxTokens: control.requestMaxTokens }
++      }
+       if (degraded !== cfg) {
+         logger.info(
+           'degraded llm call config: scope=%s model=%s->%s maxTokens=%s->%d',
+@@ -1043,21 +1317,10 @@ export function apply(ctx: Context, config: Config): void {
+   }
+ 
+   if (control.pressurePrompt) {
+-    ctx.inject(['systemPrompt'], (promptCtx) => {
+-      const systemPrompt: unknown = promptCtx.get('systemPrompt')
+-      if (!isSystemPrompt(systemPrompt)) throw new Error('agent-budget: incompatible system prompt service')
+-      promptCtx.effect(() => systemPrompt.context({
+-        name: 'agent-budget:pressure',
+-        order: PRESSURE_CONTEXT_ORDER,
+-        text: (assembleCtx) => {
+-          const agent = assembleCtx.agent
+-          if (agent === undefined || disposed) return ''
+-          const sessionId = String(agent.session.id)
+-          const scopeKey = resolveScopeKey(ctx, store, sessionId, scope, logger, ownershipCache)
+-          return pressureText(createStatus(scopeKey, false))
+-        },
+-      }), 'agent-budget: pressure-context')
+-    })
++    // DSH 0.2.2 no longer exposes the agent/session through AssembleContext, so
++    // one global pressure section cannot resolve a budget scope. Keep the
++    // feature off explicitly instead of contributing an empty section.
++    logger.warn('agent-budget: pressurePrompt is unsupported on DSH 0.2.2; set pressurePrompt:false')
+   }
+ 
+   ctx.tools.register(defineTool({
+@@ -1106,6 +1369,14 @@ export function apply(ctx: Context, config: Config): void {
+     presentCall: () => ({ card: 'generic', title: 'Token budget status', kind: 'other' }),
+   }))
+ 
++  // Settings-page payload. The ledger stores a safe-integer ceiling, so the API
++  // reports the "unlocked" reading explicitly instead of making every client
++  // compare against 2^53-1.
++  const apiStatus = (scopeKey: string): Record<string, unknown> => {
++    const status = budgetStatus(store, config, scopeKey, false, logger, missingUsage)
++    return { ...status, unlimited: status.limitTokens >= UNLIMITED_TOKENS }
++  }
++
+   ctx.inject(['webServer'], (webCtx) => {
+     const webServer: unknown = webCtx.get('webServer')
+     if (!isWebServer(webServer)) throw new Error('agent-budget: incompatible web server service')
+@@ -1122,7 +1393,7 @@ export function apply(ctx: Context, config: Config): void {
+           const scopes: Array<Record<string, unknown>> = []
+           for (const scopeKey of scopesOf(store)) {
+             const entry: Record<string, unknown> = { scopeKey }
+-            Object.assign(entry, budgetStatus(store, config, scopeKey, false, logger, missingUsage))
++            Object.assign(entry, apiStatus(scopeKey))
+             scopes.push(entry)
+           }
+           return sendJson(res, 200, { ok: true, scopes })
+@@ -1131,18 +1402,17 @@ export function apply(ctx: Context, config: Config): void {
+           const body = await readJsonBody(req)
+           if (disposed) throw new HttpError(503, 'budget service is stopping')
+           const scopeKey = typeof body.scopeKey === 'string' ? body.scopeKey : ''
+-          const limitTokens = typeof body.limitTokens === 'number' ? body.limitTokens : Number.NaN
++          const limitTokens = body.unlimited === true
++            ? UNLIMITED_TOKENS
++            : (typeof body.limitTokens === 'number' ? body.limitTokens : Number.NaN)
+           if (scopeKey.length === 0 || !Number.isSafeInteger(limitTokens) || limitTokens < 1) {
+-            return sendJson(res, 400, { ok: false, error: 'scopeKey and a positive safe integer limitTokens are required' })
++            return sendJson(res, 400, { ok: false, error: 'scopeKey and a positive safe integer limitTokens (or unlimited:true) are required' })
+           }
+           if (store.states.get(scopeKey)?.open === undefined) {
+             return sendJson(res, 404, { ok: false, error: `scope not found: ${scopeKey}` })
+           }
+           store.appendAdjust(scopeKey, limitTokens)
+-          return sendJson(res, 200, {
+-            ok: true,
+-            status: budgetStatus(store, config, scopeKey, false, logger, missingUsage),
+-          })
++          return sendJson(res, 200, { ok: true, status: apiStatus(scopeKey) })
+         }
+         if (req.method === 'POST' && path === '/reset') {
+           const body = await readJsonBody(req)
+@@ -1158,10 +1428,7 @@ export function apply(ctx: Context, config: Config): void {
+             throw new HttpError(409, 'cannot reset a scope while model calls are active')
+           }
+           store.appendReset(scopeKey)
+-          return sendJson(res, 200, {
+-            ok: true,
+-            status: budgetStatus(store, config, scopeKey, false, logger, missingUsage),
+-          })
++          return sendJson(res, 200, { ok: true, status: apiStatus(scopeKey) })
+         }
+         return sendJson(res, 404, { ok: false, error: `not found: ${path}` })
+       } catch (error: unknown) {
+diff --git a/src/reservations.ts b/src/reservations.ts
+new file mode 100644
+index 0000000..a1535bf
+--- /dev/null
++++ b/src/reservations.ts
+@@ -0,0 +1,235 @@
++/** Versioned reservation accounting; no IO or second ledger is owned here. */
++export interface UsageBuckets {
++  inputTokens: number
++  cacheReadTokens: number
++  cacheWriteTokens: number
++  outputTokens: number
++}
++export type BudgetPurpose = 'work' | 'finalize'
++export interface ReservationRequest {
++  scopeKey: string
++  modelCallId: string
++  sessionId: string
++  provider: string
++  model: string
++  purpose: BudgetPurpose
++  estimatedTokens: number
++}
++export interface Reservation extends ReservationRequest {
++  reservationId: string
++  status: 'reserved' | 'dispatched' | 'settled' | 'released_unsent' | 'unknown'
++  usage?: UsageBuckets
++  reason?: string
++}
++export interface Allocation {
++  limitTokens: number
++  usedTokens: number
++  reservedTokens: number
++  availableTokens: number
++}
++export interface BudgetSnapshot extends Allocation {
++  scopeKey: string
++  ledgerSeq: number
++  unknownCalls: number
++  exhausted: boolean
++  meteringComplete: boolean
++  usage: UsageBuckets
++  work: Allocation
++  finalize: Allocation
++}
++export type ReservationDecision =
++  | { allowed: true; reservation: Reservation; replayed: boolean }
++  | { allowed: false; reason: 'BUDGET_UNAVAILABLE' | 'USAGE_UNKNOWN' | 'CONCURRENT_LIMIT'; snapshot: BudgetSnapshot }
++export interface ReservationFields {
++  reservations: Map<string, Reservation>
++  finalizeLimit: number
++}
++export interface AccountingState extends ReservationFields {
++  open: { limitTokens: number } | undefined
++  usage: UsageBuckets
++  samples: Map<string, UsageBuckets>
++  unmetered: Set<string>
++  pending: Set<string>
++}
++type Header = { version: 2; scopeKey: string; eventId: string }
++export type ReservationEvent = Header & (
++  | { type: 'allocate'; finalizeTokens: number; reason: string }
++  | { type: 'reserve'; request: ReservationRequest; reservationId: string }
++  | { type: 'dispatch'; reservationId: string }
++  | { type: 'settle'; reservationId: string; usage: UsageBuckets }
++  | { type: 'release-unsent' | 'unknown'; reservationId: string; reason: string }
++)
++export interface BudgetEventReceipt {
++  cursor: number
++  eventId: string
++  scopeKey: string
++  type: string
++  payload: Readonly<Record<string, unknown>>
++}
++export interface AgentBudgetService {
++  /** Trusted call context; callback must consume the call within this scope. */
++  withPurpose<T>(sessionId: string, purpose: BudgetPurpose, callback: () => T): T
++  /** Trusted correlation context; callback must consume exactly one provider stream. */
++  withCallIdentity<T>(sessionId: string, modelCallId: string, callback: () => T): T
++  scopeForSession(sessionId: string, options?: { create?: boolean }): string
++  snapshot(scopeKey: string): BudgetSnapshot
++  reserve(request: ReservationRequest): ReservationDecision
++  markDispatched(reservationId: string): void
++  settle(reservationId: string, usage: UsageBuckets): void
++  releaseUnsent(reservationId: string, reason: string): void
++  markUnknown(reservationId: string, reason: string): void
++  /** Trusted operator/runtime configuration, never registered as a model tool. */
++  allocate(scopeKey: string, finalizeTokens: number, reason: string): void
++  eventsAfter(cursor: number): BudgetEventReceipt[]
++}
++
++export function tokenCount(value: unknown, label: string): asserts value is number {
++  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new TypeError(`agent-budget: invalid ${label}`)
++}
++export function usageTotal(usage: UsageBuckets): number {
++  for (const key of ['inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens'] as const) {
++    tokenCount(usage[key], `usage.${key}`)
++  }
++  const total = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens + usage.outputTokens
++  tokenCount(total, 'usage total')
++  return total
++}
++function record(value: unknown): value is Record<string, unknown> {
++  return value !== null && typeof value === 'object' && !Array.isArray(value)
++}
++function text(value: unknown): value is string {
++  return typeof value === 'string' && value.trim().length > 0
++}
++export function assertReservationRequest(value: unknown): asserts value is ReservationRequest {
++  if (!record(value)) throw new TypeError('agent-budget: invalid reservation request')
++  if (![value.scopeKey, value.modelCallId, value.sessionId, value.provider, value.model].every(text)) {
++    throw new TypeError('agent-budget: invalid reservation subject')
++  }
++  if (value.purpose !== 'work' && value.purpose !== 'finalize') throw new TypeError('agent-budget: invalid reservation purpose')
++  tokenCount(value.estimatedTokens, 'estimatedTokens')
++  if (value.estimatedTokens === 0) throw new TypeError('agent-budget: reservation must be positive')
++}
++function assertUsage(value: unknown): asserts value is UsageBuckets {
++  if (!record(value)) throw new TypeError('agent-budget: invalid usage')
++  for (const key of ['inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens']) tokenCount(value[key], `usage.${key}`)
++}
++export function isReservationEvent(value: unknown): value is ReservationEvent {
++  if (!record(value) || value.version !== 2 || !text(value.scopeKey) || !text(value.eventId)) return false
++  try {
++    if (value.type === 'allocate') {
++      tokenCount(value.finalizeTokens, 'finalizeTokens')
++      return text(value.reason)
++    }
++    if (!text(value.reservationId)) return false
++    if (value.type === 'reserve') {
++      if (!record(value.request)) return false
++      assertReservationRequest(value.request)
++      return value.request.scopeKey === value.scopeKey
++    }
++    if (value.type === 'dispatch') return true
++    if (value.type === 'settle') {
++      if (!record(value.usage)) return false
++      assertUsage(value.usage)
++      usageTotal(value.usage)
++      return true
++    }
++    return (value.type === 'release-unsent' || value.type === 'unknown') && text(value.reason)
++  } catch { return false }
++}
++function sameRequest(a: ReservationRequest, b: ReservationRequest): boolean {
++  return a.scopeKey === b.scopeKey && a.modelCallId === b.modelCallId
++    && a.sessionId === b.sessionId && a.provider === b.provider && a.model === b.model
++    && a.purpose === b.purpose && a.estimatedTokens === b.estimatedTokens
++}
++export function sameReservationRequest(a: ReservationRequest, b: ReservationRequest): boolean {
++  return sameRequest(a, b)
++}
++export function pendingReservation(r: Reservation): boolean {
++  return r.status === 'reserved' || r.status === 'dispatched' || r.status === 'unknown'
++}
++
++function allocation(limitTokens: number, used: number, reserved: number): Allocation {
++  return { limitTokens, usedTokens: used, reservedTokens: reserved, availableTokens: Math.max(0, limitTokens - used - reserved) }
++}
++
++export function snapshotOf(scopeKey: string, state: AccountingState, ledgerSeq: number, failed: boolean, liveCallIds: ReadonlySet<string>): BudgetSnapshot {
++  if (!state.open) throw new Error('agent-budget: unknown budget scope')
++  const usedTokens = usageTotal(state.usage)
++  const reservations = [...state.reservations.values()]
++  const reservedTokens = reservations.filter(pendingReservation).reduce((a, r) => a + r.estimatedTokens, 0)
++  tokenCount(reservedTokens, 'reserved total')
++  const finalizeUsed = reservations.filter(r => r.purpose === 'finalize' && r.usage).reduce((a, r) => a + usageTotal(r.usage!), 0)
++  const finalizeReserved = reservations.filter(r => r.purpose === 'finalize' && pendingReservation(r)).reduce((a, r) => a + r.estimatedTokens, 0)
++  const unknownIds = new Set(state.unmetered)
++  for (const callId of state.pending) if (!liveCallIds.has(callId)) unknownIds.add(callId)
++  for (const r of reservations) if (r.status === 'unknown' || (r.status === 'dispatched' && !liveCallIds.has(r.modelCallId))) unknownIds.add(r.modelCallId)
++  const global = allocation(state.open.limitTokens, usedTokens, reservedTokens)
++  return {
++    ...global, scopeKey, ledgerSeq, unknownCalls: unknownIds.size,
++    exhausted: failed || unknownIds.size > 0 || global.availableTokens === 0,
++    meteringComplete: unknownIds.size === 0, usage: { ...state.usage },
++    work: allocation(state.open.limitTokens - state.finalizeLimit, usedTokens - finalizeUsed, reservedTokens - finalizeReserved),
++    finalize: allocation(state.finalizeLimit, finalizeUsed, finalizeReserved),
++  }
++}
++
++/** Deterministic reducer. Caller validates against a clone before durable append. */
++export function foldReservationEvent(state: AccountingState, event: ReservationEvent): void {
++  if (!state.open) throw new Error('agent-budget: reservation event precedes open')
++  if (event.type === 'allocate') {
++    if (event.finalizeTokens > state.open.limitTokens) throw new Error('agent-budget: allocation exceeds global limit')
++    if ([...state.reservations.values()].some(pendingReservation)) throw new Error('agent-budget: cannot reallocate while reservations are unresolved')
++    state.finalizeLimit = event.finalizeTokens
++    return
++  }
++  if (event.type === 'reserve') {
++    const existing = state.reservations.get(event.reservationId)
++    if (existing) {
++      if (!sameRequest(existing, event.request)) throw new Error('agent-budget: conflicting duplicate reservation')
++      return
++    }
++    if ([...state.reservations.values()].some(r => r.modelCallId === event.request.modelCallId)
++      || state.samples.has(event.request.modelCallId) || state.unmetered.has(event.request.modelCallId) || state.pending.has(event.request.modelCallId)) {
++      throw new Error('agent-budget: modelCallId already accounted')
++    }
++    const available = snapshotOf(event.scopeKey, state, 0, false, new Set())
++    if (event.request.estimatedTokens > available.availableTokens
++      || event.request.estimatedTokens > available[event.request.purpose].availableTokens) {
++      throw new Error('agent-budget: reservation exceeds available allocation')
++    }
++    state.reservations.set(event.reservationId, { ...event.request, reservationId: event.reservationId, status: 'reserved' })
++    return
++  }
++  const reservation = state.reservations.get(event.reservationId)
++  if (!reservation) throw new Error('agent-budget: unknown reservation')
++  if (event.type === 'dispatch') {
++    if (reservation.status === 'dispatched') return
++    if (reservation.status !== 'reserved') throw new Error('agent-budget: cannot dispatch non-reserved call')
++    reservation.status = 'dispatched'
++  } else if (event.type === 'release-unsent') {
++    if (reservation.status === 'released_unsent') return
++    if (reservation.status !== 'reserved') throw new Error('agent-budget: dispatched call cannot be released as unsent')
++    reservation.status = 'released_unsent'
++    reservation.reason = event.reason
++  } else if (event.type === 'unknown') {
++    if (reservation.status === 'unknown') return
++    if (reservation.status !== 'dispatched') throw new Error('agent-budget: only dispatched calls can become unknown')
++    reservation.status = 'unknown'
++    reservation.reason = event.reason
++  } else if (event.type === 'settle') {
++    const value = usageTotal(event.usage)
++    if (reservation.status === 'settled') {
++      if ((['inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens'] as const).some(k => event.usage[k] !== reservation.usage?.[k])) throw new Error('agent-budget: conflicting settlement')
++      return
++    }
++    if (reservation.status !== 'dispatched' && reservation.status !== 'unknown') throw new Error('agent-budget: settle requires a dispatched or unknown call')
++    tokenCount(usageTotal(state.usage) + value, 'settled total')
++    for (const key of ['inputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens'] as const) state.usage[key] += event.usage[key]
++    state.samples.set(reservation.modelCallId, { ...event.usage })
++    state.unmetered.delete(reservation.modelCallId)
++    state.pending.delete(reservation.modelCallId)
++    reservation.status = 'settled'
++    reservation.usage = { ...event.usage }
++    delete reservation.reason
++  }
++}
+diff --git a/tests/agent-budget.spec.ts b/tests/agent-budget.spec.ts
+index 0873504..14cc68e 100644
+--- a/tests/agent-budget.spec.ts
++++ b/tests/agent-budget.spec.ts
+@@ -1,7 +1,7 @@
+ import { describe, expect, it } from 'vitest'
+ import { Session } from '@deepseek-ai/dsh-session'
+ import { apply, Config, inject, name } from '../src/index.ts'
+-import { finish, TestHarness, text, usage } from './helpers.ts'
++import { allEvents, finish, TestHarness, text, usage } from './helpers.ts'
+ 
+ describe('plugin surface and config', () => {
+   it('exposes the function-plugin entry points without a default export', async () => {
+@@ -22,6 +22,16 @@ describe('plugin surface and config', () => {
+     },
+   )
+ 
++  it('opens every new scope unlocked when maxTokens is omitted', async () => {
++    const harness = new TestHarness({})
++    const root = harness.root('unlocked-root')
++    // Opening a conversation must not impose a ceiling by default.
++    await harness.stream(root, [usage({ inputTokens: 1 }), finish()])
++    const status = await harness.status(root)
++    expect(status.limitTokens).toBe(Number.MAX_SAFE_INTEGER)
++    expect(status.exhausted).toBe(false)
++  })
++
+   it('rejects unknown direct-call config keys', () => {
+     expect(() => apply({} as never, { maxTokens: 10, typo: true } as never))
+       .toThrow('unknown config key')
+@@ -71,7 +81,7 @@ describe('accounting', () => {
+     const statuses = await Promise.all([root, first, second, workflow].map(session => harness.status(session)))
+     for (const status of statuses) expect(status).toMatchObject({ usedTokens: 75, remainingTokens: 25 })
+     for (const session of [root, first, second, workflow]) {
+-      expect(session.events.some(event => event.type.startsWith('budget/'))).toBe(false)
++      expect(allEvents(session).some(event => event.type.startsWith('budget/'))).toBe(false)
+     }
+     expect(harness.ledgerLines().filter(line => line.type === 'sample')).toHaveLength(4)
+   })
+@@ -103,7 +113,7 @@ describe('accounting', () => {
+     expect(await harness.status(original)).toMatchObject({ usedTokens: 41 })
+     expect(await harness.status(fork)).toMatchObject({ usedTokens: 7 })
+     expect(await harness.status(unrelated)).toMatchObject({ usedTokens: 11 })
+-    expect(fork.events.some(event => event.type.startsWith('budget/'))).toBe(false)
++    expect(allEvents(fork).some(event => event.type.startsWith('budget/'))).toBe(false)
+     expect(harness.ledgerLines().filter(line => line.type === 'open')).toHaveLength(3)
+   })
+ 
+@@ -124,7 +134,7 @@ describe('accounting', () => {
+     const root = harness.root('outside')
+     await harness.stream(undefined, [usage({ inputTokens: 100, outputTokens: 100 }), finish()])
+     expect(await harness.status(root)).toMatchObject({ usedTokens: 0, remainingTokens: 10 })
+-    expect(root.events.some(event => event.type.startsWith('budget/'))).toBe(false)
++    expect(allEvents(root).some(event => event.type.startsWith('budget/'))).toBe(false)
+     expect(harness.ledgerLines()).toHaveLength(0)
+   })
+ })
+@@ -199,7 +209,7 @@ describe('admission and incomplete metering', () => {
+       providerCalls += 1
+     })).rejects.toThrow('non-empty')
+     expect(providerCalls).toBe(0)
+-    expect(root.events.filter(event => event.type.startsWith('budget/'))).toHaveLength(0)
++    expect(allEvents(root).filter(event => event.type.startsWith('budget/'))).toHaveLength(0)
+     expect(harness.ledgerLines()).toHaveLength(0)
+   })
+ })
+@@ -236,7 +246,7 @@ describe('replay and lifecycle', () => {
+     const harness = new TestHarness({ maxTokens: 10 })
+     const root = harness.root('reconstruct')
+     await harness.stream(root, [usage({ inputTokens: 1 }), finish()])
+-    expect(root.events.filter(event => event.type.startsWith('budget/'))).toHaveLength(0)
+-    expect(() => Session.create(root.id, root.events, root.header)).not.toThrow()
++    expect(allEvents(root).filter(event => event.type.startsWith('budget/'))).toHaveLength(0)
++    expect(() => Session.create(root.id, allEvents(root), root.header)).not.toThrow()
+   })
+ })
+diff --git a/tests/client.spec.ts b/tests/client.spec.ts
+index af83604..8f4985f 100644
+--- a/tests/client.spec.ts
++++ b/tests/client.spec.ts
+@@ -8,7 +8,16 @@ import { apply } from '../src/client/index.tsx'
+ 
+ let container: HTMLDivElement
+ let root: Root
+-const scope = { scopeKey: 'root', limitTokens: 100, usedTokens: 10, remainingTokens: 90, exhausted: false, unmeteredCalls: 0 }
++const scope = {
++  scopeKey: 'root',
++  limitTokens: 100,
++  usedTokens: 10,
++  remainingTokens: 90,
++  exhausted: false,
++  unlimited: false,
++  unmeteredCalls: 0,
++}
++const unlocked = { ...scope, limitTokens: Number.MAX_SAFE_INTEGER, unlimited: true }
+ const fetchMock = vi.fn<typeof fetch>()
+ const reply = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), { status })
+ 
+@@ -46,13 +55,20 @@ function buttons(): HTMLButtonElement[] {
+   return [...container.querySelectorAll('button')]
+ }
+ 
++/** Buttons are addressed by label so the row can grow without churn. */
++function button(label: string): HTMLButtonElement {
++  const found = buttons().find(candidate => candidate.textContent === label)
++  if (found === undefined) throw new Error(`missing button: ${label}`)
++  return found
++}
++
+ describe('settings interactions', () => {
+   it('preserves an API error instead of overwriting it with a refresh', async () => {
+     fetchMock.mockResolvedValueOnce(reply({ ok: true, scopes: [scope] }))
+     await mount()
+     fetchMock.mockResolvedValueOnce(reply({ ok: false, error: 'cannot reset an active scope' }, 409))
+     vi.spyOn(window, 'confirm').mockReturnValue(true)
+-    await act(async () => buttons()[1]!.click())
++    await act(async () => button('重置用量').click())
+     expect(container.querySelector('[role="status"]')?.textContent).toContain('cannot reset an active scope')
+     expect(fetchMock).toHaveBeenCalledTimes(2)
+     expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('x-agent-budget-request')).toBe('1')
+@@ -90,10 +106,51 @@ describe('settings interactions', () => {
+     fetchMock.mockResolvedValueOnce(reply({ ok: true, scopes: [scope] }))
+     await mount()
+     vi.spyOn(window, 'confirm').mockReturnValue(false)
+-    await act(async () => buttons()[1]!.click())
++    await act(async () => button('重置用量').click())
+     expect(fetchMock).toHaveBeenCalledTimes(1)
+   })
+ 
++  it('renders an unlocked scope without a limit bar and disables unlock', async () => {
++    fetchMock.mockResolvedValueOnce(reply({ ok: true, scopes: [unlocked] }))
++    await mount()
++    expect(container.textContent).toContain('无限制')
++    expect(container.querySelector('.agb-bar')).toBeNull()
++    expect(button('解除限制').disabled).toBe(true)
++    expect(button('锁定此对话').disabled).toBe(true)
++  })
++
++  it('locks an unlocked conversation with the typed ceiling', async () => {
++    fetchMock.mockResolvedValueOnce(reply({ ok: true, scopes: [unlocked] }))
++    await mount()
++    fetchMock.mockResolvedValueOnce(reply({ ok: true }))
++      .mockResolvedValueOnce(reply({ ok: true, scopes: [{ ...scope, limitTokens: 7777 }] }))
++    const input = container.querySelector('input')!
++    const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!
++    await act(async () => {
++      descriptor.set!.call(input, '7777')
++      input.dispatchEvent(new Event('input', { bubbles: true }))
++    })
++    await act(async () => button('锁定此对话').click())
++    const requestBody = fetchMock.mock.calls[1]?.[1]?.body
++    if (typeof requestBody !== 'string') throw new Error('request body was not serialized JSON')
++    const body = JSON.parse(requestBody)
++    expect(body).toEqual({ scopeKey: 'root', limitTokens: 7777 })
++    expect(input.value).toBe('7777')
++  })
++
++  it('removes the ceiling with an explicit unlimited request', async () => {
++    fetchMock.mockResolvedValueOnce(reply({ ok: true, scopes: [scope] }))
++    await mount()
++    fetchMock.mockResolvedValueOnce(reply({ ok: true }))
++      .mockResolvedValueOnce(reply({ ok: true, scopes: [unlocked] }))
++    await act(async () => button('解除限制').click())
++    const requestBody = fetchMock.mock.calls[1]?.[1]?.body
++    if (typeof requestBody !== 'string') throw new Error('request body was not serialized JSON')
++    const body = JSON.parse(requestBody)
++    expect(body).toEqual({ scopeKey: 'root', unlimited: true })
++    expect(container.textContent).toContain('无限制')
++  })
++
+   it('shows unavailable state when the initial load fails', async () => {
+     fetchMock.mockResolvedValueOnce(reply({ ok: false, error: 'forbidden' }, 403))
+     await mount()
+diff --git a/tests/control-degrade.spec.ts b/tests/control-degrade.spec.ts
+index 35dfb36..4cd65bd 100644
+--- a/tests/control-degrade.spec.ts
++++ b/tests/control-degrade.spec.ts
+@@ -153,46 +153,15 @@ describe('concurrency limit', () => {
+ })
+ 
+ describe('budget pressure prompt', () => {
+-  it('registers the pressure context by default', () => {
++  it('is unsupported on DSH 0.2.2 and contributes no prompt context', () => {
+     const harness = new TestHarness({ maxTokens: 100 })
+-    expect(harness.promptContexts.map(entry => entry.name)).toContain('agent-budget:pressure')
+-  })
+-
+-  it('stays silent below the warn threshold', async () => {
+-    const harness = new TestHarness({ maxTokens: 100 })
+-    const root = harness.root('root')
+-    await harness.stream(root, [usage({ inputTokens: 40 }), finish()])
+-    expect(harness.pressureTextFor(root)).toBe('')
+-  })
+-
+-  it('warns at or above half of the budget', async () => {
+-    const harness = new TestHarness({ maxTokens: 100 })
+-    const root = harness.root('root')
+-    await harness.stream(root, [usage({ inputTokens: 60 }), finish()])
+-    expect(harness.pressureTextFor(root)).toContain('Token budget notice: 60/100')
+-  })
+-
+-  it('escalates to critical at or above eighty percent', async () => {
+-    const harness = new TestHarness({ maxTokens: 100 })
+-    const root = harness.root('root')
+-    await harness.stream(root, [usage({ inputTokens: 85 }), finish()])
+-    expect(harness.pressureTextFor(root)).toContain('Token budget critical: 85/100')
+-  })
+-
+-  it('reports critical pressure once the budget is exhausted', async () => {
+-    const harness = new TestHarness({ maxTokens: 100 })
+-    const root = harness.root('root')
+-    await harness.stream(root, [usage({ inputTokens: 100 }), finish()])
+-    expect(harness.pressureTextFor(root)).toContain('Token budget critical: 100/100')
+-  })
+-
+-  it('contributes nothing for agent-less diagnostic assemblies', () => {
+-    const harness = new TestHarness({ maxTokens: 100 })
+-    expect(harness.pressureTextFor()).toBe('')
++    expect(harness.promptContexts).toHaveLength(0)
++    expect(harness.warnings.some(line => line.includes('pressurePrompt is unsupported'))).toBe(true)
+   })
+ 
+-  it('registers nothing when pressurePrompt is disabled', () => {
++  it('registers nothing and stays quiet when pressurePrompt is disabled', () => {
+     const harness = new TestHarness({ maxTokens: 100, pressurePrompt: false })
+     expect(harness.promptContexts).toHaveLength(0)
++    expect(harness.warnings.some(line => line.includes('pressurePrompt is unsupported'))).toBe(false)
+   })
+ })
+diff --git a/tests/fixtures/legacy-ledger-v1.jsonl b/tests/fixtures/legacy-ledger-v1.jsonl
+new file mode 100644
+index 0000000..767c982
+--- /dev/null
++++ b/tests/fixtures/legacy-ledger-v1.jsonl
+@@ -0,0 +1,5 @@
++{"type":"open","version":1,"scopeKey":"fixture-root","epochId":"fixture-epoch","limitTokens":100}
++{"type":"start","version":1,"scopeKey":"fixture-root","callId":"legacy-a"}
++{"type":"sample","version":1,"scopeKey":"fixture-root","callId":"legacy-a","sessionId":"fixture-root","provider":"fixture","model":"fixture","purpose":"conversation","usage":{"inputTokens":10,"cacheReadTokens":2,"cacheWriteTokens":0,"outputTokens":3}}
++{"type":"sample","version":1,"scopeKey":"fixture-root","callId":"legacy-a","sessionId":"fixture-root","provider":"fixture","model":"fixture","purpose":"conversation","usage":{"inputTokens":12,"cacheReadTokens":2,"cacheWriteTokens":0,"outputTokens":4}}
++{"type":"end","version":1,"scopeKey":"fixture-root","callId":"legacy-a"}
+diff --git a/tests/helpers.ts b/tests/helpers.ts
+index f40e411..e34fa7b 100644
+--- a/tests/helpers.ts
++++ b/tests/helpers.ts
+@@ -5,21 +5,20 @@ import { Readable } from 'node:stream'
+ import { afterEach } from 'vitest'
+ import type { Context } from '@deepseek-ai/cordis'
+ import type { GenerateOptions, LlmCallConfig, StreamChunk, TokenUsage } from '@deepseek-ai/dsh-llm'
+-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+-import type { SessionHeader } from '@deepseek-ai/dsh-session'
++import { SESSION_FORMAT_VERSION, Session, SessionId, SessionSeq } from '@deepseek-ai/dsh-session'
++import type { SessionEvent, SessionHeader } from '@deepseek-ai/dsh-session'
+ import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
+ import { apply } from '../src/index.ts'
+ import type { Config } from '../src/index.ts'
+ 
+-const loggerMock = Object.assign(
+-  (_name?: string) => loggerMock,
+-  {
+-    info: () => {},
+-    warn: () => {},
+-    debug: () => {},
+-    error: () => {},
+-  },
+-)
++declare module '@deepseek-ai/dsh-llm' {
++  interface LlmRequestPurposeMap {
++    compaction: true
++    'session-title': true
++    'timeline-report': true
++    'auto-review': true
++  }
++}
+ 
+ export type StreamHandler = (
+   options: GenerateOptions,
+@@ -56,6 +55,17 @@ export class TestHarness {
+   readonly promptContexts: PromptContextEntry[] = []
+   readonly webServerRoutes: Array<{ kind: string; path: string; handler: (...args: any[]) => unknown }> = []
+   readonly storageDir: string
++  readonly services = new Map<string, unknown>()
++  readonly warnings: string[] = []
++  readonly logger = Object.assign(
++    (_name?: string) => this.logger,
++    {
++      info: () => {},
++      warn: (...args: unknown[]) => { this.warnings.push(args.map(value => String(value)).join(' ')) },
++      debug: () => {},
++      error: () => {},
++    },
++  )
+   tool: ToolDefinition | undefined
+   readonly disposers: Array<() => unknown> = []
+   readonly webServer = {
+@@ -72,14 +82,15 @@ export class TestHarness {
+   }
+ 
+   readonly context = {
++    provide: (key: string, value: unknown) => { this.services.set(key, value) },
+     inject: (_deps: string[], callback: (ctx: Context) => unknown) => callback(this.context),
+-    get: (key: string) => key === 'webServer' ? this.webServer : key === 'systemPrompt' ? this.systemPrompt : undefined,
++    get: (key: string) => key === 'webServer' ? this.webServer : key === 'systemPrompt' ? this.systemPrompt : this.services.get(key),
+     effect: (callback: () => unknown) => {
+       const result = callback()
+       if (typeof result === 'function') this.disposers.push(result as () => unknown)
+       return typeof result === 'function' ? result : () => undefined
+     },
+-    logger: loggerMock,
++    logger: this.logger,
+     sessions: {
+       get: (id: string) => this.sessionsById.get(id),
+       list: () => [...this.sessionsById.values()],
+@@ -127,14 +138,22 @@ export class TestHarness {
+   }
+ 
+   fork(id: string, parent: Session): Session {
+-    return this.add(Session.create(SessionId(id), parent.events, header(id, {
+-      parentSession: parent.id,
+-      seedLength: parent.events.length,
+-    })))
++    // An ordinary fork inherits the parent's events but not its lineage: DSH
++    // 0.2.2 records the fork cut as `inheritedEventCount` and keeps
++    // `parentSession` for subagent creation only.
++    const seed = parent.snapshotEvents()
++    return this.add(Session.create(SessionId(id), seed, header(id, {
++      isSeeded: true,
++    }), parent.seq))
+   }
+ 
+   resume(session: Session): Session {
+-    return this.add(Session.create(session.id, session.events, session.header))
++    return this.add(Session.create(
++      session.id,
++      session.snapshotEvents(),
++      session.header,
++      session.inheritedEventCount,
++    ))
+   }
+ 
+   async stream(
+@@ -232,14 +251,26 @@ export class TestHarness {
+   }
+ }
+ 
++/** Read the complete session log, including log-only `budget/*` records. */
++export function allEvents(session: Session): SessionEvent[] {
++  const events: SessionEvent[] = []
++  for (let seq = 0; seq < session.seq; seq += 1) {
++    const event = session.eventAt(SessionSeq(seq))
++    if (event === undefined) throw new Error(`session ${session.id} is missing event at seq ${seq}`)
++    events.push(event)
++  }
++  return events
++}
++
+ function header(
+   id: string,
+-  lineage: Partial<Pick<SessionHeader, 'parentSession' | 'origin' | 'seedLength'>>,
++  lineage: Partial<Pick<SessionHeader, 'parentSession' | 'origin' | 'isSeeded'>>,
+ ): SessionHeader {
+   return {
+     version: SESSION_FORMAT_VERSION,
+     id: SessionId(id),
+     createdAt: Date.now(),
++    isSeeded: false,
+     ...lineage,
+   }
+ }
+diff --git a/tests/integration.spec.ts b/tests/integration.spec.ts
+index aad2c04..d38997b 100644
+--- a/tests/integration.spec.ts
++++ b/tests/integration.spec.ts
+@@ -7,10 +7,11 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
+ import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
+ import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
+ import SessionStore, { Session, SessionId } from '@deepseek-ai/dsh-session'
++import SessionProjection from '@deepseek-ai/dsh-session-projection'
+ import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+ import ToolRuntime from '@deepseek-ai/dsh-tools'
+ import { apply, inject, name } from '../src/index.ts'
+-import { finish, usage } from './helpers.ts'
++import { allEvents, finish, usage } from './helpers.ts'
+ 
+ class MockAdapter extends LlmAdapter {
+   calls = 0
+@@ -51,6 +52,7 @@ describe('DSH runtime integration', () => {
+     const ctx = new Context()
+     await ctx.plugin(LlmRuntime)
+     await ctx.plugin(SessionStore)
++    await ctx.plugin(SessionProjection)
+     await ctx.plugin(SystemPrompt)
+     await ctx.plugin(ToolRuntime)
+     await ctx.plugin(AgentRegistry)
+@@ -68,12 +70,12 @@ describe('DSH runtime integration', () => {
+     }))
+     expect(adapter.calls).toBe(1)
+     expect(chunks).toHaveLength(2)
+-    expect(session.events.some(event => event.type.startsWith('budget/'))).toBe(false)
++    expect(allEvents(session).some(event => event.type.startsWith('budget/'))).toBe(false)
+     expect(ctx.tools.get('budget_status')).toBeDefined()
+ 
+     await fiber.dispose()
+     expect(ctx.tools.get('budget_status')).toBeUndefined()
+-    const samples = session.events.filter(event => event.type === 'budget/sample').length
++    const samples = allEvents(session).filter(event => event.type === 'budget/sample').length
+     await Array.fromAsync(ctx.llm.stream({
+       provider: 'mock',
+       model: 'mock-model',
+@@ -81,7 +83,7 @@ describe('DSH runtime integration', () => {
+       sessionId: session.id,
+     }))
+     expect(adapter.calls).toBe(2)
+-    expect(session.events.filter(event => event.type === 'budget/sample')).toHaveLength(samples)
++    expect(allEvents(session).filter(event => event.type === 'budget/sample')).toHaveLength(samples)
+   })
+ 
+   it('keeps independent sessions independent and reconstructable without the plugin', async () => {
+@@ -89,6 +91,7 @@ describe('DSH runtime integration', () => {
+     const ctx = new Context()
+     await ctx.plugin(LlmRuntime)
+     await ctx.plugin(SessionStore)
++    await ctx.plugin(SessionProjection)
+     await ctx.plugin(SystemPrompt)
+     await ctx.plugin(ToolRuntime)
+     await ctx.plugin(AgentRegistry)
+@@ -127,7 +130,7 @@ describe('DSH runtime integration', () => {
+     expect(secondStatus).toMatchObject({ usedTokens: 1, exhausted: false })
+ 
+     await fiber.dispose()
+-    expect(() => Session.create(first.id, first.events, first.header)).not.toThrow()
+-    expect(() => Session.create(second.id, second.events, second.header)).not.toThrow()
++    expect(() => Session.create(first.id, allEvents(first), first.header)).not.toThrow()
++    expect(() => Session.create(second.id, allEvents(second), second.header)).not.toThrow()
+   })
+ })
+diff --git a/tests/reservation-stream.spec.ts b/tests/reservation-stream.spec.ts
+new file mode 100644
+index 0000000..1467ee5
+--- /dev/null
++++ b/tests/reservation-stream.spec.ts
+@@ -0,0 +1,156 @@
++import { describe, expect, it } from 'vitest'
++import { Context } from '@deepseek-ai/cordis'
++import AgentRegistry from '@deepseek-ai/dsh-agent'
++import LlmRuntime, { LlmAdapter } from '@deepseek-ai/dsh-llm'
++import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
++import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
++import SessionProjection from '@deepseek-ai/dsh-session-projection'
++import ToolRuntime from '@deepseek-ai/dsh-tools'
++import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
++import { mkdtempSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++import { apply, inject, name } from '../src/index.ts'
++import type { AgentBudgetService } from '../src/index.ts'
++import { TestHarness, finish, text, usage } from './helpers.ts'
++
++describe('opt-in provider reservation hook', () => {
++  it('keeps concurrent same-session streams bound to their trusted call identities', async () => {
++    const h = new TestHarness({ maxTokens: 2000, reservationMode: true })
++    const root = h.root('root')
++    const service = h.services.get('agentBudget') as AgentBudgetService
++    const handler = h.streamHandlers[0]!
++    let started = 0
++    let releaseBoth!: () => void
++    const bothStarted = new Promise<void>(resolve => { releaseBoth = resolve })
++    const run = (modelCallId: string, inputTokens: number) => service.withCallIdentity('root', modelCallId, async () => {
++      const options: GenerateOptions = { provider: 'mock', model: 'mock-model', sessionId: root.id, messages: [], maxTokens: 50 }
++      const iterable = handler(options, async function* () {
++        started += 1
++        if (started === 2) releaseBoth()
++        await bothStarted
++        yield usage({ inputTokens })
++        yield finish()
++      })
++      return Array.fromAsync(iterable)
++    })
++    await Promise.all([run('call-a', 7), run('call-b', 11)])
++    const reservations = h.ledgerLines().filter(line => line.type === 'reserve') as Array<{ request: { modelCallId: string } }>
++    expect(reservations.map(line => line.request.modelCallId).toSorted()).toEqual(['call-a', 'call-b'])
++    expect(service.snapshot('root')).toMatchObject({ usedTokens: 18, reservedTokens: 0, unknownCalls: 0 })
++  })
++
++  it('settles only the final cumulative usage without legacy double-debit', async () => {
++    const h = new TestHarness({ maxTokens: 2000, reservationMode: true })
++    const root = h.root('root')
++    const service = h.services.get('agentBudget') as AgentBudgetService
++    await h.stream(root, [usage({ inputTokens: 5 }), usage({ inputTokens: 10, outputTokens: 3 }), finish()], { maxTokens: 50 })
++    expect(service.snapshot('root')).toMatchObject({ usedTokens: 13, reservedTokens: 0, unknownCalls: 0 })
++    expect(h.ledgerLines().map(x => x.type)).toEqual(['open', 'reserve', 'dispatch', 'settle'])
++  })
++
++  it('denies unscoped requests but admits unbounded ones against the allowance', async () => {
++    const h = new TestHarness({ maxTokens: 20_000, reservationMode: true })
++    const root = h.root('root')
++    let calls = 0
++    await expect(h.stream(undefined, [], { maxTokens: 50 }, () => { calls++ })).rejects.toMatchObject({ code: 'TOKEN_BUDGET_SESSION_REQUIRED' })
++    // No maxTokens: the call keeps the caller's own bound and reserves against
++    // the configured allowance instead of being rejected.
++    await h.stream(root, [usage({ inputTokens: 5 }), finish()], {}, () => { calls++ })
++    expect(calls).toBe(1)
++    expect(h.ledgerLines().filter(x => x.type === 'reserve')).toHaveLength(1)
++  })
++
++  it('does not release missing usage even when legacy missingUsage is ignore', async () => {
++    const h = new TestHarness({ maxTokens: 2000, reservationMode: true, missingUsage: 'ignore' })
++    const root = h.root('root')
++    const service = h.services.get('agentBudget') as AgentBudgetService
++    await h.stream(root, [text(), finish()], { maxTokens: 50 })
++    expect(service.snapshot('root')).toMatchObject({ unknownCalls: 1, meteringComplete: false })
++    await expect(h.stream(root, [usage(), finish()], { maxTokens: 50 })).rejects.toThrow('USAGE_UNKNOWN')
++    expect(h.ledgerLines().filter(x => x.type === 'reserve')).toHaveLength(1)
++  })
++
++  it('keeps a cancelled partial stream reserved until usage can be reconciled', async () => {
++    const h = new TestHarness({ maxTokens: 2000, reservationMode: true })
++    const root = h.root('root')
++    const service = h.services.get('agentBudget') as AgentBudgetService
++    const iterable = h.streamHandlers[0]!({ provider: 'mock', model: 'mock', sessionId: root.id, messages: [], maxTokens: 50 }, async function* () {
++      yield usage({ inputTokens: 10 })
++      yield text('unfinished')
++      yield finish()
++    })
++    for await (const chunk of iterable) { expect(chunk.type).toBe('usage'); break }
++    expect(service.snapshot('root')).toMatchObject({ usedTokens: 0, unknownCalls: 1 })
++    expect(service.snapshot('root').reservedTokens).toBeGreaterThan(0)
++  })
++
++  it('assigns finalize from a trusted async context and preserves the global limit', async () => {
++    const h = new TestHarness({ maxTokens: 1000, reservationMode: true })
++    const root = h.root('root')
++    const service = h.services.get('agentBudget') as AgentBudgetService
++    service.scopeForSession('root')
++    service.allocate('root', 400, 'operator configured report budget')
++    const decision = service.reserve({ scopeKey: 'root', sessionId: 'root', modelCallId: 'work', provider: 'mock', model: 'mock', estimatedTokens: 600, purpose: 'work' })
++    if (!decision.allowed) throw new Error(decision.reason)
++    service.markDispatched(decision.reservation.reservationId)
++    service.settle(decision.reservation.reservationId, { inputTokens: 600, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 })
++    await expect(h.stream(root, [usage(), finish()], { maxTokens: 10 })).rejects.toThrow('BUDGET_UNAVAILABLE')
++    await service.withPurpose('root', 'finalize', async () => {
++      await Promise.resolve()
++      await h.stream(root, [usage({ inputTokens: 10, outputTokens: 5 }), finish()], { maxTokens: 10 })
++    })
++    expect(service.snapshot('root')).toMatchObject({ usedTokens: 615, finalize: { usedTokens: 15 } })
++    await expect(h.stream(root, [usage(), finish()], { maxTokens: 10 })).rejects.toThrow('BUDGET_UNAVAILABLE')
++  })
++
++  it('adds a bounded output configuration through the actual request waterfall contract', async () => {
++    const h = new TestHarness({ maxTokens: 5000, reservationMode: true, requestMaxTokens: 128 })
++    const root = h.root('root')
++    const result = await h.request(root)
++    expect(result.maxTokens).toBe(128)
++    expect(h.lastRequestBase?.maxTokens).toBeUndefined()
++  })
++
++  it('leaves the caller output bound untouched when no request cap is configured', async () => {
++    const h = new TestHarness({ maxTokens: 5000, reservationMode: true })
++    const root = h.root('root')
++    const result = await h.request(root, { maxTokens: 256000 })
++    expect(result.maxTokens).toBe(256000)
++  })
++
++  it('runs through the real Cordis/DSH LlmRuntime with a controlled provider adapter', async () => {
++    class Adapter extends LlmAdapter {
++      calls = 0
++      override stream(_options: GenerateOptions): AsyncIterable<StreamChunk> {
++        this.calls++
++        return (async function* () { yield usage({ inputTokens: 12, outputTokens: 4 }); yield finish() })()
++      }
++    }
++    const ctx = new Context()
++    await ctx.plugin(LlmRuntime)
++    await ctx.plugin(SessionStore)
++    await ctx.plugin(SessionProjection)
++    await ctx.plugin(SystemPrompt)
++    await ctx.plugin(ToolRuntime)
++    await ctx.plugin(AgentRegistry)
++    const fiber = ctx.plugin({ name, inject, apply }, { maxTokens: 1000, reservationMode: true, pressurePrompt: false, storageDir: mkdtempSync(join(tmpdir(), 'budget-reservation-host-')) })
++    await fiber.await()
++    try {
++      const adapter = new Adapter()
++      ctx.llm.registerAdapter(['controlled'], adapter)
++      const root = ctx.sessions.create(SessionId('root'))
++      await Array.fromAsync(ctx.llm.stream(Object.freeze({ provider: 'controlled', model: 'controlled-model', messages: [], sessionId: root.id, maxTokens: 32 })))
++      expect(adapter.calls).toBe(1)
++      const service = ctx.get('agentBudget')
++      expect(service).toBeDefined()
++      expect(service!.snapshot('root')).toMatchObject({ usedTokens: 16, reservedTokens: 0, unknownCalls: 0 })
++      service!.allocate('root', 400, 'trusted finalization test')
++      await service!.withPurpose('root', 'finalize', async () => {
++        await Promise.resolve()
++        await Array.fromAsync(ctx.llm.stream({ provider: 'controlled', model: 'controlled-model', messages: [], sessionId: root.id, maxTokens: 32 }))
++      })
++      expect(service!.snapshot('root')).toMatchObject({ usedTokens: 32, finalize: { usedTokens: 16 } })
++    } finally { await fiber.dispose() }
++  })
++})
+diff --git a/tests/reservations.spec.ts b/tests/reservations.spec.ts
+new file mode 100644
+index 0000000..63f6f65
+--- /dev/null
++++ b/tests/reservations.spec.ts
+@@ -0,0 +1,235 @@
++import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmdirSync, writeFileSync } from 'node:fs'
++import { join } from 'node:path'
++import { tmpdir } from 'node:os'
++import { describe, expect, it } from 'vitest'
++import type { AgentBudgetService, ReservationRequest } from '../src/index.ts'
++import { TestHarness, finish, usage } from './helpers.ts'
++
++const actual = (inputTokens: number, outputTokens = 0) => ({ inputTokens, outputTokens, cacheReadTokens: 0, cacheWriteTokens: 0 })
++function setup(maxTokens = 100, maxConcurrentCalls?: number) {
++  const harness = new TestHarness({ maxTokens, ...(maxConcurrentCalls === undefined ? {} : { maxConcurrentCalls }) })
++  harness.root('root')
++  const budget = harness.services.get('agentBudget') as AgentBudgetService
++  const scopeKey = budget.scopeForSession('root')
++  const request = (modelCallId: string, estimatedTokens: number, purpose: 'work' | 'finalize' = 'work'): ReservationRequest => ({
++    scopeKey, modelCallId, sessionId: 'root', provider: 'mock', model: 'mock-model', purpose, estimatedTokens,
++  })
++  const reserve = (callId: string, amount: number, purpose: 'work' | 'finalize' = 'work') => {
++    const decision = budget.reserve(request(callId, amount, purpose))
++    if (!decision.allowed) throw new Error(decision.reason)
++    return decision.reservation.reservationId
++  }
++  return { harness, budget, scopeKey, request, reserve }
++}
++
++describe('durable reservation service', () => {
++  it('replays the frozen v1 fixture with replacement samples exactly once', () => {
++    const dir = mkdtempSync(join(tmpdir(), 'budget-legacy-fixture-'))
++    copyFileSync(new URL('./fixtures/legacy-ledger-v1.jsonl', import.meta.url), join(dir, 'ledger.jsonl'))
++    const harness = new TestHarness({ maxTokens: 9999, storageDir: dir })
++    const budget = harness.services.get('agentBudget') as AgentBudgetService
++    expect(budget.snapshot('fixture-root')).toMatchObject({ limitTokens: 100, usedTokens: 18, reservedTokens: 0, availableTokens: 82, unknownCalls: 0 })
++  })
++  it('atomically admits only one contender for the final capacity and persists before returning', async () => {
++    const { harness, budget, scopeKey, request } = setup(100)
++    const results = await Promise.all([Promise.resolve().then(() => budget.reserve(request('a', 70))), Promise.resolve().then(() => budget.reserve(request('b', 70)))])
++    expect(results.filter(x => x.allowed)).toHaveLength(1)
++    expect(budget.snapshot(scopeKey).reservedTokens).toBe(70)
++    expect(harness.ledgerLines().filter(x => x.type === 'reserve')).toHaveLength(1)
++    expect(existsSync(join(harness.storageDir, 'ledger.v1-backup.jsonl'))).toBe(true)
++  })
++
++  it('replays reserve without occupying more credit and rejects conflicting reuse', () => {
++    const { harness, budget, scopeKey, request } = setup()
++    const first = budget.reserve(request('same', 30))
++    const second = budget.reserve(request('same', 30))
++    expect(second).toMatchObject({ allowed: true, replayed: true })
++    expect(first.allowed && second.allowed && first.reservation.reservationId === second.reservation.reservationId).toBe(true)
++    expect(budget.snapshot(scopeKey).reservedTokens).toBe(30)
++    expect(() => budget.reserve(request('same', 31))).toThrow('conflicting')
++    expect(harness.ledgerLines().filter(x => x.type === 'reserve')).toHaveLength(1)
++  })
++
++  it('uses the original shared root for children and rejects a supplied scope mismatch', () => {
++    const { harness, budget, scopeKey, request } = setup()
++    const parent = harness.sessionsById.get('root')!
++    harness.child('child', parent)
++    expect(budget.scopeForSession('child')).toBe(scopeKey)
++    expect(budget.reserve({ ...request('child-call', 20), sessionId: 'child' }).allowed).toBe(true)
++    expect(() => budget.reserve({ ...request('wrong', 20), scopeKey: 'other' })).toThrow('scope mismatch')
++  })
++
++  it('settles actual use once and rejects a conflicting final usage', () => {
++    const { harness, budget, scopeKey, reserve } = setup()
++    const id = reserve('a', 40)
++    budget.markDispatched(id)
++    budget.settle(id, actual(12, 8))
++    budget.settle(id, actual(12, 8))
++    expect(budget.snapshot(scopeKey)).toMatchObject({ usedTokens: 20, reservedTokens: 0, availableTokens: 80 })
++    expect(harness.ledgerLines().filter(x => x.type === 'settle')).toHaveLength(1)
++    expect(() => budget.settle(id, actual(21))).toThrow('conflicting settlement')
++    expect(() => budget.markDispatched(id)).toThrow('non-reserved')
++  })
++
++  it('releases only known-unsent requests and never refunds a dispatched request', () => {
++    const { budget, scopeKey, reserve } = setup()
++    const unsent = reserve('unsent', 20)
++    budget.releaseUnsent(unsent, 'validation failed before dispatch')
++    budget.releaseUnsent(unsent, 'validation failed before dispatch')
++    expect(budget.snapshot(scopeKey).reservedTokens).toBe(0)
++    const sent = reserve('sent', 20)
++    budget.markDispatched(sent)
++    expect(() => budget.releaseUnsent(sent, 'client timed out')).toThrow('cannot be released')
++    budget.markUnknown(sent, 'client timed out')
++  })
++
++  it('blocks the root on unknown usage then accepts late authoritative settlement', () => {
++    const { budget, scopeKey, reserve, request } = setup()
++    const id = reserve('a', 30)
++    budget.markDispatched(id)
++    budget.markUnknown(id, 'connection lost')
++    expect(budget.snapshot(scopeKey)).toMatchObject({ unknownCalls: 1, reservedTokens: 30, meteringComplete: false })
++    expect(budget.reserve(request('b', 10))).toMatchObject({ allowed: false, reason: 'USAGE_UNKNOWN' })
++    budget.settle(id, actual(22))
++    expect(budget.snapshot(scopeKey)).toMatchObject({ unknownCalls: 0, usedTokens: 22, availableTokens: 78 })
++    expect(budget.reserve(request('b', 10)).allowed).toBe(true)
++  })
++
++  it('records actual overshoot without clipping it and denies later admission', () => {
++    const { budget, scopeKey, reserve, request } = setup(30)
++    const id = reserve('a', 20)
++    budget.markDispatched(id)
++    budget.settle(id, actual(40))
++    expect(budget.snapshot(scopeKey)).toMatchObject({ usedTokens: 40, availableTokens: 0, exhausted: true })
++    expect(budget.reserve(request('b', 1))).toMatchObject({ allowed: false, reason: 'BUDGET_UNAVAILABLE' })
++  })
++
++  it('keeps work and finalize allocations within the same global amount', () => {
++    const { budget, scopeKey, reserve, request } = setup(100)
++    budget.allocate(scopeKey, 10, 'reserve report allowance')
++    const id = reserve('work', 90)
++    expect(budget.reserve(request('extra-work', 1))).toMatchObject({ allowed: false, reason: 'BUDGET_UNAVAILABLE' })
++    const finalId = reserve('report', 10, 'finalize')
++    expect(budget.snapshot(scopeKey)).toMatchObject({ reservedTokens: 100, availableTokens: 0 })
++    budget.markDispatched(id)
++    budget.settle(id, actual(85))
++    budget.markDispatched(finalId)
++    budget.settle(finalId, actual(8))
++    expect(budget.snapshot(scopeKey)).toMatchObject({ usedTokens: 93, availableTokens: 7, work: { availableTokens: 5 }, finalize: { availableTokens: 2 } })
++  })
++
++  it('counts pending reservations against concurrency and rejects reallocation while unresolved', () => {
++    const { budget, scopeKey, request, reserve } = setup(100, 1)
++    const first = reserve('a', 10)
++    expect(budget.reserve(request('b', 10))).toMatchObject({ allowed: false, reason: 'CONCURRENT_LIMIT' })
++    expect(() => budget.allocate(scopeKey, 5, 'change')).toThrow('unresolved')
++    budget.releaseUnsent(first, 'not dispatched')
++    expect(budget.reserve(request('b', 10)).allowed).toBe(true)
++  })
++
++  it('does not mutate state or write an event for invalid usage/transition', () => {
++    const { harness, budget, scopeKey, reserve } = setup()
++    const id = reserve('a', 10)
++    const count = harness.ledgerLines().length
++    expect(() => budget.settle(id, actual(5))).toThrow('requires')
++    expect(() => budget.markUnknown(id, 'not sent')).toThrow('only dispatched')
++    expect(harness.ledgerLines()).toHaveLength(count)
++    budget.markDispatched(id)
++    expect(() => budget.settle(id, actual(-1))).toThrow('invalid')
++    expect(budget.snapshot(scopeKey).usedTokens).toBe(0)
++    budget.markUnknown(id, 'invalid usage')
++  })
++
++  it('replays old history and v2 settlements without resetting accumulated use', async () => {
++    const { harness, budget, scopeKey, reserve } = setup()
++    await harness.stream(harness.sessionsById.get('root'), [usage({ inputTokens: 5 }), finish()])
++    const id = reserve('new', 20)
++    budget.markDispatched(id)
++    budget.settle(id, actual(12))
++    const before = budget.snapshot(scopeKey)
++    harness.dispose()
++    const reloaded = new TestHarness({ maxTokens: 999, storageDir: harness.storageDir })
++    const service = reloaded.services.get('agentBudget') as AgentBudgetService
++    expect(service.snapshot(scopeKey)).toEqual(before)
++    expect(service.snapshot(scopeKey).limitTokens).toBe(100)
++  })
++
++  it('recovers a persisted dispatch as unknown rather than releasing its estimate', () => {
++    const dir = mkdtempSync(join(tmpdir(), 'budget-reservation-crash-'))
++    const req: ReservationRequest = { scopeKey: 'root', modelCallId: 'a', sessionId: 'root', provider: 'mock', model: 'mock', purpose: 'work', estimatedTokens: 20 }
++    const lines = [
++      { type: 'open', version: 1, scopeKey: 'root', epochId: 'epoch', limitTokens: 100 },
++      { type: 'reserve', version: 2, scopeKey: 'root', eventId: 'r', reservationId: 'r1', request: req },
++      { type: 'dispatch', version: 2, scopeKey: 'root', eventId: 'd', reservationId: 'r1' },
++    ]
++    writeFileSync(join(dir, 'ledger.jsonl'), lines.map(x => JSON.stringify(x)).join('\n') + '\n')
++    const harness = new TestHarness({ maxTokens: 100, storageDir: dir })
++    const budget = harness.services.get('agentBudget') as AgentBudgetService
++    expect(budget.snapshot('root')).toMatchObject({ reservedTokens: 20, unknownCalls: 1 })
++    expect(harness.ledgerLines().at(-1)).toMatchObject({ type: 'unknown', reason: 'recovered-dispatch-without-settlement' })
++    budget.settle('r1', actual(8))
++    expect(budget.snapshot('root')).toMatchObject({ usedTokens: 8, reservedTokens: 0, unknownCalls: 0 })
++  })
++
++  it('provides stable replay receipts and immutable snapshots', () => {
++    const { budget, scopeKey, reserve } = setup()
++    const cursor = budget.snapshot(scopeKey).ledgerSeq
++    reserve('a', 10)
++    const receipts = budget.eventsAfter(cursor)
++    expect(receipts).toHaveLength(1)
++    expect(receipts[0]).toMatchObject({ type: 'reserve', cursor: cursor + 1 })
++    receipts[0]!.type = 'tampered'
++    expect(budget.eventsAfter(cursor)[0]!.type).toBe('reserve')
++    const snapshot = budget.snapshot(scopeKey)
++    snapshot.usage.inputTokens = 12345
++    expect(budget.snapshot(scopeKey).usedTokens).toBe(0)
++    expect(() => budget.eventsAfter(999)).toThrow('ahead')
++  })
++
++  it('fails closed when persistence fails before admission', () => {
++    const { harness, budget, request, scopeKey, reserve } = setup()
++    budget.releaseUnsent(reserve('initial', 1), 'not sent')
++    const ledger = join(harness.storageDir, 'ledger.jsonl')
++    const moved = join(harness.storageDir, 'ledger.test-backup')
++    renameSync(ledger, moved)
++    mkdirSync(ledger)
++    try {
++      expect(() => budget.reserve(request('a', 10))).toThrow()
++      expect(budget.snapshot(scopeKey)).toMatchObject({ reservedTokens: 0, exhausted: true })
++      expect(() => budget.reserve(request('b', 10))).toThrow('storage failed')
++    } finally {
++      rmdirSync(ledger)
++      renameSync(moved, ledger)
++    }
++    expect(harness.ledgerLines().filter(x => x.type === 'reserve')).toHaveLength(1)
++  })
++
++  it('refuses malformed v2 history and does not drop accounting records', () => {
++    const { harness, reserve } = setup()
++    reserve('a', 10)
++    harness.dispose()
++    appendFileSync(join(harness.storageDir, 'ledger.jsonl'), JSON.stringify({ type: 'settle', version: 2, scopeKey: 'root', eventId: 'bad', reservationId: 'missing', usage: actual(5) }) + '\n')
++    expect(() => new TestHarness({ maxTokens: 100, storageDir: harness.storageDir })).toThrow('unknown reservation')
++    expect(readFileSync(join(harness.storageDir, 'ledger.jsonl'), 'utf8')).toContain('"eventId":"bad"')
++  })
++
++  it('allows an in-flight call to settle while disposing, then releases the writer lease', () => {
++    const { harness, budget, reserve, scopeKey, request } = setup()
++    const id = reserve('a', 10)
++    budget.markDispatched(id)
++    harness.dispose()
++    expect(existsSync(join(harness.storageDir, 'writer.lock'))).toBe(true)
++    expect(() => budget.reserve(request('b', 5))).toThrow('disposed')
++    budget.settle(id, actual(5))
++    expect(budget.snapshot(scopeKey).usedTokens).toBe(5)
++    expect(existsSync(join(harness.storageDir, 'writer.lock'))).toBe(false)
++  })
++
++  it('denies a second writer and refuses unknown schema versions', () => {
++    const { harness } = setup()
++    expect(() => new TestHarness({ maxTokens: 100, storageDir: harness.storageDir })).toThrow('locked')
++    harness.dispose()
++    appendFileSync(join(harness.storageDir, 'ledger.jsonl'), JSON.stringify({ type: 'future', version: 99, scopeKey: 'root' }) + '\n')
++    expect(() => new TestHarness({ maxTokens: 100, storageDir: harness.storageDir })).toThrow('invalid ledger record')
++  })
++})
+diff --git a/tests/writer-recovery.spec.ts b/tests/writer-recovery.spec.ts
+new file mode 100644
+index 0000000..e1fec82
+--- /dev/null
++++ b/tests/writer-recovery.spec.ts
+@@ -0,0 +1,69 @@
++import { spawn } from 'node:child_process'
++import { once } from 'node:events'
++import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
++import { tmpdir } from 'node:os'
++import { join } from 'node:path'
++import { describe, expect, it, vi } from 'vitest'
++import { recoverWriterLock } from '../scripts/recover-writer-lock.mjs'
++import { acquireStorageLock } from '../scripts/storage.mjs'
++
++const directory = () => mkdtempSync(join(tmpdir(), 'budget-lock-recovery-'))
++const lock = (dir: string, pid: number) => writeFileSync(join(dir, 'writer.lock'), JSON.stringify({ pid, id: 'stale-identity' }))
++
++describe('explicit stale writer recovery', () => {
++  it('recovers a lock left by an actually terminated writer without changing the ledger', async () => {
++    const dir = directory()
++    const moduleUrl = new URL('../scripts/storage.mjs', import.meta.url).href
++    const script = `import { acquireStorageLock } from ${JSON.stringify(moduleUrl)}; acquireStorageLock(${JSON.stringify(dir)}); process.send('locked'); setInterval(() => {}, 1000)`
++    const child = spawn(process.execPath, ['--input-type=module', '-e', script], { stdio: ['ignore', 'ignore', 'inherit', 'ipc'], windowsHide: true })
++    try {
++      await once(child, 'message')
++      const pid = child.pid!
++      const exited = once(child, 'exit')
++      child.kill('SIGKILL')
++      await exited
++      writeFileSync(join(dir, 'ledger.jsonl'), 'unchanged-history\n')
++      expect(recoverWriterLock(dir, pid)).toMatchObject({ recovered: true, pid })
++      expect(readFileSync(join(dir, 'ledger.jsonl'), 'utf8')).toBe('unchanged-history\n')
++      const release = acquireStorageLock(dir)
++      release()
++      expect(existsSync(join(dir, 'writer-recovery.lock'))).toBe(false)
++    } finally { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL') }
++  })
++
++  it('refuses a live process and preserves the lock', () => {
++    const dir = directory()
++    lock(dir, process.pid)
++    expect(() => recoverWriterLock(dir, process.pid)).toThrow('still alive')
++    expect(existsSync(join(dir, 'writer.lock'))).toBe(true)
++    expect(existsSync(join(dir, 'writer-recovery.lock'))).toBe(false)
++  })
++
++  it('refuses mismatching operator identity, malformed data and invalid PIDs', () => {
++    const dir = directory()
++    lock(dir, process.pid)
++    expect(() => recoverWriterLock(dir, process.pid + 1)).toThrow('PID changed')
++    expect(() => recoverWriterLock(dir, 0)).toThrow('positive')
++    writeFileSync(join(dir, 'writer.lock'), '{"pid":null}')
++    expect(() => recoverWriterLock(dir, process.pid)).toThrow('invalid')
++  })
++
++  it('refuses uncertain liveness instead of treating a permission error as death', () => {
++    const dir = directory()
++    lock(dir, process.pid)
++    const probe = vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('permission denied'), { code: 'EPERM' }) })
++    try {
++      expect(() => recoverWriterLock(dir, process.pid)).toThrow('permission denied')
++      expect(existsSync(join(dir, 'writer.lock'))).toBe(true)
++    } finally { probe.mockRestore() }
++  })
++
++  it('serializes recovery and never removes an existing recovery guard', () => {
++    const dir = directory()
++    lock(dir, process.pid)
++    writeFileSync(join(dir, 'writer-recovery.lock'), 'another recovery')
++    expect(() => recoverWriterLock(dir, process.pid)).toThrow()
++    expect(readFileSync(join(dir, 'writer-recovery.lock'), 'utf8')).toBe('another recovery')
++    expect(existsSync(join(dir, 'writer.lock'))).toBe(true)
++  })
++})

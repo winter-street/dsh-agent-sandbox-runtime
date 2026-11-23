@@ -1,0 +1,92 @@
+{
+  "name": "agent-sandbox-runtime",
+  "version": "0.4.0-dev.0",
+  "private": true,
+  "type": "module",
+  "description": "Durable OpenSandbox runtime for DeepSeek Harness sessions",
+  "exports": {
+    ".": {
+      "types": "./dist/plugin/index.d.ts",
+      "import": "./dist/plugin/index.js"
+    },
+    "./client": "./dist/client/dsh-panel.js",
+    "./library": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "engines": {
+    "node": ">=22.19.0 <23 || >=24.9.0",
+    "dsh": ">=0.2.2-rc.3 <0.3.0-0"
+  },
+  "files": [
+    "dist",
+    "config",
+    "locale",
+    "docs/DETAIL.md",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md"
+  ],
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-client.mjs",
+    "eval": "tsx eval/cli.ts",
+    "app": "tsx src/app/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "fixture:verify": "python examples/charging-analysis/verify.py --self-test"
+  },
+  "dependencies": {
+    "@alibaba-group/opensandbox": "1.2.1",
+    "@deepseek-ai/schemastery": "3.19.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "ajv": "8.20.0",
+    "zod": "4.6.7"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.1.0 <5.0.0",
+    "@deepseek-ai/dsh-agent": ">=0.2.2-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-attachment": ">=0.2.2-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-llm": ">=0.2.2-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-session": ">=0.2.2-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-session-projection": ">=0.2.2-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-system-prompt": ">=0.2.2-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.2.2-rc.3 <0.3.0-0",
+    "@deepseek-ai/dsh-workspace": ">=0.2.2-rc.3 <0.3.0-0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.1.0",
+    "@deepseek-ai/dsh-agent": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-agent-loop": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-attachment": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-llm": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-session": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-session-projection": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-system-prompt": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tool-executor-native": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-workspace": "0.2.2-rc.3",
+    "@types/node": "22.20.5",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

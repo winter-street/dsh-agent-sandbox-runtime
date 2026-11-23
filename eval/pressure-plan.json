@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "budget-pressure-controlled-v1",
+  "mode": "controlled",
+  "budgets": [3000, 6000, 12000],
+  "variants": ["hard-only", "tiered", "tiered-finalize"],
+  "scenarios": ["steady", "retry-unsent", "unknown-usage"],
+  "order": "budget,scenario,variant; rotate first variant by budget index",
+  "segments": [[3, 8, -2], [11, -4, 6], [9, 2, 1], [-7, 13, 5], [21, -8, 2], [6, 6, 6], [-3, 17, 4], [10, 12, -9]],
+  "optionalAfterEachSegment": true,
+  "syntheticTokensPerCall": 450,
+  "outputCap": 256,
+  "finalizeRatio": 0.1,
+  "maxRetries": 2,
+  "success": "All eight independently summed segments match; no unknown usage or outstanding reservation; partial stays partial.",
+  "denialReview": "Review every denial against required/optional status, complete-request estimate, original global/class availability, accounting completeness, cancellation, deadline and concurrency. A required request fitting all hard boundaries but stopped by soft policy is a candidate false denial, retained for review.",
+  "limitations": ["Controlled provider and synthetic usage; not an LLM quality or currency-cost experiment.", "No sandbox is invoked by this policy/ledger benchmark.", "The frozen charging evaluation suite and its historical results are independent."]
+}

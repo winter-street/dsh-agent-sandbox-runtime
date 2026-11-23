@@ -1,0 +1,45 @@
+{
+  "status": "passed",
+  "agentscope_version": "2.0.12",
+  "source_commit": "28ab5ef6b1d8969c6ed8a3975c2063478a5c4986",
+  "mode": "offline-real-sdk-controlled-fixtures",
+  "network_forbidden": true,
+  "production_adapter_delivered": false,
+  "checks": {
+    "sdk_version": "2.0.12",
+    "message_roundtrip": true,
+    "tool_schema_and_execution": {
+      "name": "add",
+      "result": "5",
+      "call_id": "fixture-call"
+    },
+    "state_roundtrip_and_reply": {
+      "session_id": "contract-session",
+      "durable_runtime_recovery_tested": false
+    },
+    "inner_retry_visibility": {
+      "sdk_attempts": 2,
+      "middleware_calls": 1,
+      "usage_is_synthetic": true
+    },
+    "missing_usage_event": {
+      "response_usage_missing": true,
+      "event_input_tokens": 0,
+      "event_output_tokens": 0,
+      "zero_is_not_settlement_proof": true
+    },
+    "cancelled_model": {
+      "finished_reason": "interrupted",
+      "usage_missing": true
+    },
+    "cache_accounting": {
+      "agentscope_input_inclusive": 100,
+      "cache_read_subset": 40,
+      "output": 20,
+      "naive_sum_wrong": 160,
+      "runtime_disjoint_input": 60,
+      "correct_total": 120,
+      "usage_is_synthetic": true
+    }
+  }
+}

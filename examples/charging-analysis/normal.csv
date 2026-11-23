@@ -1,0 +1,11 @@
+alert_id,device_id,occurred_at,severity,review_state
+A01,D01,2026-10-01T00:10:00+08:00,high,confirmed
+A02,D01,2026-10-01T01:00:00+08:00,low,rejected
+A03,D02,2026-10-01T07:10:00+08:00,medium,confirmed
+A04,D03,2026-10-01T12:30:00+08:00,high,pending
+A05,D02,2026-10-01T18:20:00+08:00,high,confirmed
+A06,D01,2026-10-02T00:20:00+08:00,medium,confirmed
+A07,D03,2026-10-02T06:00:00+08:00,low,rejected
+A08,D02,2026-10-02T12:00:00+08:00,low,pending
+A09,D01,2026-10-02T18:00:00+08:00,high,confirmed
+A10,D04,2026-10-02T23:59:00+08:00,medium,pending
