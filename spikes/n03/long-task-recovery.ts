@@ -1,12 +1,20 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { recoverWriterLock } from '../../.sources/budget/scripts/recover-writer-lock.mjs';
 import { openBrowser } from './browser.mjs';
 import { domain, env, maxCalls, model, pluginUrl, safeError, worker, type WorkerMessage } from './worker.js';
+
+async function recoverBudgetWriterLock(directory: string, pid: number): Promise<unknown> {
+  const script = fileURLToPath(new URL('../../.sources/budget/scripts/recover-writer-lock.mjs', import.meta.url));
+  assert(existsSync(script), 'The pinned budget plugin recovery script is absent; reproduce .sources/budget first.');
+  const { recoverWriterLock } = await import(pathToFileURL(script).href) as {
+    recoverWriterLock(directory: string, expectedPid: number): unknown;
+  };
+  return recoverWriterLock(directory, pid);
+}
 
 async function preflight() {
   env('DEEPSEEK_API_KEY'); env('OPEN_SANDBOX_API_KEY');
@@ -117,7 +125,7 @@ async function run(directory: string, timeout: number) {
     await ui.offline(true);
     assert(active.child.kill('SIGKILL'));
     const termination = await active.exit; assert.equal(termination.signal, 'SIGKILL'); report.termination = termination;
-    report.budgetLockRecovery = recoverWriterLock(join(directory, 'budget'), before.pid);
+    report.budgetLockRecovery = await recoverBudgetWriterLock(join(directory, 'budget'), before.pid);
     active = launch(directory, id, deadline, Number(new URL(url).port), token);
     assert.equal((await active.wait('ready')).url, url);
     active.child.send('run');
